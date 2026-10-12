@@ -17,6 +17,7 @@ namespace {
 
 constexpr int kRecipeVersion = 1;
 constexpr const char* kFormat = "sphoto-recipe";
+constexpr int kMaxIgnoredDepth = 64;
 
 class Reader {
  public:
@@ -99,18 +100,21 @@ class Reader {
       }
       value *= std::pow(10.0, exp_sign * exponent);
     }
-    *out = sign * value;
+    value *= sign;
+    if (!std::isfinite(value)) return error();
+    *out = value;
     return true;
   }
 
   // Skips any JSON value.
-  bool skip() {
+  bool skip(int depth = 0) {
     space();
     if (*p_ == '"') {
       std::string ignored;
       return string(&ignored);
     }
     if (*p_ == '{' || *p_ == '[') {
+      if (depth >= kMaxIgnoredDepth) return error();
       const char close = *p_ == '{' ? '}' : ']';
       const bool object = *p_ == '{';
       ++p_;
@@ -120,7 +124,7 @@ class Reader {
           std::string key;
           if (!string(&key) || !expect(':')) return false;
         }
-        if (!skip()) return false;
+        if (!skip(depth + 1)) return false;
       } while (comma());
       return expect(close);
     }
@@ -237,7 +241,7 @@ bool read_geometry(Reader& in, sp_geometry* g) {
     double v;
     if (key == "quarter_turns") {
       if (!in.number(&v)) return false;
-      g->quarter_turns = ((static_cast<int>(std::lround(v)) % 4) + 4) % 4;
+      g->quarter_turns = ((static_cast<int>(std::lround(std::fmod(v, 4.0))) % 4) + 4) % 4;
     } else if (key == "flip_horizontal") {
       bool flip;
       if (!in.boolean(&flip)) return false;

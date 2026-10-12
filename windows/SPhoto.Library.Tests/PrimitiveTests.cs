@@ -51,12 +51,12 @@ public class FingerprintTests
     }
 
     [Fact]
-    public void MiddleOfALargeFileIsNotRead()
+    public void MiddleOfALargeFileChangesItsIdentity()
     {
         var data = Random(200_000, 4);
         var before = Fingerprint.Compute(new MemoryStream(data));
         data[100_000] ^= 1;
-        Assert.Equal(before, Fingerprint.Compute(new MemoryStream(data)));
+        Assert.NotEqual(before, Fingerprint.Compute(new MemoryStream(data)));
     }
 
     [Fact]

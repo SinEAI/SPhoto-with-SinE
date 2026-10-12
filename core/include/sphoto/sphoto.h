@@ -124,6 +124,8 @@ SP_API int sp_geometry_output_size(const sp_geometry* geometry, int src_width,
  *     "adjust": { "exposure": 0.5, "contrast": 0.2 } }
  * Missing adjustments are 0; unknown keys are ignored so older builds read
  * newer recipes of the same version. */
+/* Readers reject non-finite numbers and unknown values nested deeper than
+ * 64 containers with SP_ERR_FORMAT; outputs are unchanged on failure. */
 SP_API int sp_recipe_read(const char* json, sp_params* params);
 /* The same for a whole edit, with "filter", "geometry", "curves" and "hsl"
  * sections (curves and bands left out are untouched):

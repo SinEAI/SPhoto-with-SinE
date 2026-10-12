@@ -23,26 +23,27 @@ public static class Fingerprinter
     {
         int done = 0;
         string? after = null;
+        bool migrating = index.NeedsFingerprintMigration;
         var parallel = new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 4), CancellationToken = cancel };
         while (true)
         {
             cancel.ThrowIfCancellationRequested();
             var batch = index.PendingFingerprints(BatchSize, after);
-            if (batch.Count == 0) return done;
+            if (batch.Count == 0) { index.FinishFingerprintMigration(); return done; }
             after = batch[^1].Path;
 
-            var results = new ConcurrentBag<(string, string, long?, long?)>();
+            var results = new ConcurrentBag<(string, string, long?, long?, string?)>();
             Parallel.ForEach(batch, parallel, file =>
             {
                 try
                 {
-                    var fp = Fingerprint.Compute(file.Path);
+                    var identity = migrating ? Fingerprint.ComputeForMigration(file.Path) : (Fingerprint.Compute(file.Path), (string?)null);
                     // Store it only when the file is still the one the index
                     // describes; otherwise the next scan resets it anyway.
                     var info = new FileInfo(file.Path);
                     if (info.Exists && file.Matches(info.Length, info.LastWriteTimeUtc.Ticks))
                     {
-                        results.Add((file.Path, fp, file.Size, file.MtimeTicks));
+                        results.Add((file.Path, identity.Item1, file.Size, file.MtimeTicks, identity.Item2));
                     }
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -50,7 +51,7 @@ public static class Fingerprinter
                     // Locked or gone: passed over until the next run.
                 }
             });
-            done += index.SetFingerprints(results);
+            done += index.SetFingerprintsWithLegacy(results);
             progress?.Report(done);
         }
     }

@@ -1,9 +1,110 @@
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
 #include "sphoto/sphoto.h"
 #include "test.h"
+
+TEST(recipe_rejects_non_finite_numbers_at_each_destination) {
+  const std::vector<std::string> sections = {
+    R"("adjust":{"exposure":VALUE})",
+    R"("filter":{"id":"film","strength":VALUE})",
+    R"("geometry":{"quarter_turns":VALUE})",
+    R"("geometry":{"crop":[0,0,VALUE,1]})",
+    R"("curves":{"rgb":[[0,0],[1,VALUE]]})",
+    R"("hsl":{"hue":[VALUE]})",
+    R"("future":VALUE)"
+  };
+  for (const auto& section : sections) {
+    for (const auto& value : {"0e400", "-0E+400", "1e400", "-1e309"}) {
+      std::string field = section;
+      field.replace(field.find("VALUE"), 5, value);
+      const std::string json = R"({"format":"sphoto-recipe","version":1,)" + field + "}";
+      sp_edit e{};
+      e.adjust.exposure = 0.75f;
+      EXPECT(sp_recipe_read_edit(json.c_str(), &e) == SP_ERR_FORMAT);
+      EXPECT(e.adjust.exposure == 0.75f);
+    }
+    std::string field = section;
+    field.replace(field.find("VALUE"), 5, "0.25");
+    const std::string json = R"({"format":"sphoto-recipe","version":1,)" + field + "}";
+    sp_edit e{};
+    EXPECT(sp_recipe_read_edit(json.c_str(), &e) == SP_OK);
+  }
+  sp_params p{};
+  p.exposure = 0.75f;
+  EXPECT(sp_recipe_read(R"({"format":"sphoto-recipe","version":0e400})", &p) == SP_ERR_FORMAT);
+  EXPECT(p.exposure == 0.75f);
+}
+
+TEST(recipe_numbers_keep_finite_clamping_underflow_and_future_versions) {
+  sp_params p{};
+  EXPECT(sp_recipe_read(R"({"format":"sphoto-recipe","version":1,"adjust":{"exposure":1e308,"grain":1e-400}})", &p) == SP_OK);
+  EXPECT(p.exposure == 4.0f && p.grain == 0.0f);
+  EXPECT(sp_recipe_read(R"({"format":"sphoto-recipe","version":1e308})", &p) == SP_ERR_UNSUPPORTED);
+  for (const auto& value : {"0e309", "0.0e999999", "1e999999"}) {
+    const std::string json = R"({"format":"sphoto-recipe","version":1,"adjust":{"exposure":)" + std::string(value) + "}}";
+    EXPECT(sp_recipe_read(json.c_str(), &p) == SP_ERR_FORMAT);
+  }
+  const std::string json = R"({"format":"sphoto-recipe","version":1,"adjust":{"exposure":)" + std::string(400, '9') + "e-400}}";
+  EXPECT(sp_recipe_read(json.c_str(), &p) == SP_ERR_FORMAT);
+}
+
+TEST(recipe_unknown_nesting_is_bounded_at_all_fallbacks) {
+  const std::vector<std::string> sections = {"", "adjust", "filter", "geometry", "curves", "hsl"};
+  for (const auto& section : sections) {
+    std::string value = "0";
+    for (int i = 0; i < 40; ++i) value = R"([{"key":)" + value + "}]";
+    const std::string field = section.empty() ? R"("future":)" + value : "\"" + section + R"(":{"future":)" + value + "}";
+    const std::string json = R"({"format":"sphoto-recipe","version":1,)" + field + "}";
+    sp_edit e{};
+    e.adjust.exposure = 0.75f;
+    EXPECT(sp_recipe_read_edit(json.c_str(), &e) == SP_ERR_FORMAT);
+    EXPECT(e.adjust.exposure == 0.75f);
+  }
+  for (int depth : {64, 65, 100000}) {
+    const std::string json = R"({"format":"sphoto-recipe","version":1,"future":)" + std::string(depth, '[') + "0" + std::string(depth, ']') + "}";
+    sp_edit e{};
+    EXPECT(sp_recipe_read_edit(json.c_str(), &e) == (depth == 64 ? SP_OK : SP_ERR_FORMAT));
+  }
+}
+
+TEST(recipe_unknown_siblings_do_not_accumulate_depth) {
+  std::string json = R"({"format":"sphoto-recipe","version":1)";
+  for (int i = 0; i < 1000; ++i) json += R"(,"future":[{"ok":true}])";
+  json += "}";
+  sp_edit e{};
+  EXPECT(sp_recipe_read_edit(json.c_str(), &e) == SP_OK);
+}
+
+TEST(recipe_large_finite_quarter_turns_are_normalized_before_integer_conversion) {
+  for (const auto& value : {"1e300", "-1e300", "3.5", "-3.5"}) {
+    const std::string json = R"({"format":"sphoto-recipe","version":1,"geometry":{"quarter_turns":)" + std::string(value) + "}}";
+    sp_edit e{};
+    EXPECT(sp_recipe_read_edit(json.c_str(), &e) == SP_OK);
+    EXPECT(e.geometry.quarter_turns == 0);
+  }
+}
+
+TEST(recipe_late_failure_preserves_the_complete_output) {
+  sp_edit edit{};
+  std::snprintf(edit.filter, sizeof(edit.filter), "film");
+  edit.filter_strength = 0.5f;
+  edit.geometry.quarter_turns = 3;
+  edit.adjust.exposure = 0.75f;
+  sp_edit before;
+  std::memcpy(&before, &edit, sizeof(edit));
+  const char* bad = R"({"format":"sphoto-recipe","version":1,"adjust":{"exposure":0.2},"hsl":{"hue":[0.1,0e400]}})";
+  EXPECT(sp_recipe_read_edit(bad, &edit) == SP_ERR_FORMAT);
+  EXPECT(std::memcmp(&before, &edit, sizeof(edit)) == 0);
+  for (int depth : {64, 65}) {
+    std::string value = "{}";
+    for (int i = 1; i < depth; ++i) value = R"({"child":)" + value + "}";
+    const std::string json = R"({"format":"sphoto-recipe","version":1,"future":)" + value + "}";
+    EXPECT(sp_recipe_read_edit(json.c_str(), &edit) == (depth == 64 ? SP_OK : SP_ERR_FORMAT));
+  }
+}
 
 namespace {
 

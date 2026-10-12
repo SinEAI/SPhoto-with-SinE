@@ -17,11 +17,10 @@ import zlib
 
 COUNT = 600
 WIDTH, HEIGHT = 1280, 960
-EDGE_BYTES = 32 * 1024  # SPhoto.Library/Fingerprint.cs
 UNIX_EPOCH_TICKS = 621355968000000000
 FIRST_MTIME_SECONDS = 1704067200  # 2024-01-01 UTC
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-TABLES = {"files", "analysis", "tags", "pages", "page_tags", "stack_overrides", "versions"}
+TABLES = {"files", "analysis", "tags", "pages", "page_tags", "stack_overrides", "versions", "legacy_fingerprints"}
 
 
 class FixtureError(Exception):
@@ -36,14 +35,14 @@ def read_schema(path):
             "SELECT type, name, tbl_name, sql FROM sqlite_master "
             "WHERE sql IS NOT NULL ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END, name"
         ).fetchall()
-        if version != 2:
-            raise FixtureError("the template must use the current library schema (version 2)")
+        if version != 4:
+            raise FixtureError("the template must use the current library schema (version 4)")
         if {name for kind, name, _, _ in definitions if kind == "table"} != TABLES:
             raise FixtureError("the template has an unexpected library table structure")
         if any(kind not in {"table", "index"} or table not in TABLES for kind, _, table, _ in definitions):
             raise FixtureError("the template must contain only library tables and indexes")
         expected = {
-            "files": {"path", "size", "mtime_ticks", "taken_ticks", "exif_taken", "camera", "fingerprint"},
+            "files": {"path", "size", "mtime_ticks", "taken_ticks", "exif_taken", "camera", "fingerprint", "legacy_fingerprint"},
             "analysis": {"fingerprint", "dhash", "sharpness", "exposure"},
         }
         for table, columns in expected.items():
@@ -74,10 +73,8 @@ def photo_png(index):
 
 
 def fingerprint(content):
-    # The C# implementation hashes signed Int64 length in little-endian,
-    # followed by the entire file below 64 KiB, else its two 32 KiB ends.
-    edges = content if len(content) < 2 * EDGE_BYTES else content[:EDGE_BYTES] + content[-EDGE_BYTES:]
-    return hashlib.sha256(struct.pack("<q", len(content)) + edges).hexdigest()
+    # The C# identity includes length and every byte, including the middle.
+    return hashlib.sha256(struct.pack("<q", len(content)) + content).hexdigest()
 
 
 def prepare(schema, root, unindexed=False):

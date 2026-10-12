@@ -205,6 +205,19 @@ internal static class RuntimeTest
                 var after = await ImageIO.SizeAsync(copy);
                 Checks.Add(new("unchanged_export_keeps_original_dimensions", before == after,
                     new { original_width = before.Width, original_height = before.Height, output_width = after.Width, output_height = after.Height }));
+                Checks.Add(new("preview_geometry_uses_original_dimensions", session.OutputSize(default) == before,
+                    new { expected_width = before.Width, expected_height = before.Height }));
+                session.Turn(clockwise: true);
+                string turned = System.IO.Path.Combine(root, "wide-turned.png");
+                await session.SaveToAsync(turned);
+                var rotated = await ImageIO.SizeAsync(turned);
+                Checks.Add(new("rotated_large_export_keeps_original_resolution", rotated == (before.Height, before.Width),
+                    new { width = rotated.Width, height = rotated.Height }));
+                File.SetLastWriteTimeUtc(original, DateTime.UtcNow.AddMinutes(1));
+                bool rejected = false;
+                try { await session.SaveToAsync(System.IO.Path.Combine(root, "changed-copy.png")); }
+                catch (InvalidOperationException) { rejected = true; }
+                Checks.Add(new("changed_original_is_not_silently_redecoded", rejected, new { rejected }));
                 done.SetResult(true);
             }
             catch (Exception e) { done.SetException(e); }

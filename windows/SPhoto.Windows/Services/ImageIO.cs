@@ -40,6 +40,10 @@ internal static class ImageIO
     /// display, otherwise straight RGBA for the core.
     /// </summary>
     internal static async Task<Pixels> DecodeAsync(string path, int maxSide, bool bgra)
+        => (await DecodeWithSizeAsync(path, maxSide, bgra)).Pixels;
+
+    /// The decoded working image and the original upright dimensions, from one file opening.
+    internal static async Task<(Pixels Pixels, int FullWidth, int FullHeight)> DecodeWithSizeAsync(string path, int maxSide, bool bgra)
     {
         // Read the actual file, with an explicit lifetime for the decoder's
         // stream. No Explorer thumbnail provider participates in this path.
@@ -62,7 +66,8 @@ internal static class ImageIO
             bgra ? BitmapPixelFormat.Bgra8 : BitmapPixelFormat.Rgba8,
             bgra ? BitmapAlphaMode.Premultiplied : BitmapAlphaMode.Straight,
             transform, ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.ColorManageToSRgb);
-        return Orient(new Pixels(data.DetachPixelData(), sw, sh), orientation);
+        var pixels = Orient(new Pixels(data.DetachPixelData(), sw, sh), orientation);
+        return orientation >= 5 ? (pixels, h, w) : (pixels, w, h);
     }
 
     /// <summary>

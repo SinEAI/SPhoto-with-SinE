@@ -19,7 +19,7 @@ namespace SPhoto.Library;
 public sealed class LibraryIndex : IDisposable
 {
     /// Bumped with every schema change; Migrate brings older files forward.
-    public const int SchemaVersion = 3;
+    public const int SchemaVersion = 4;
 
     private readonly object _gate = new();
     private SqliteConnection? _db;
@@ -150,7 +150,19 @@ public sealed class LibraryIndex : IDisposable
                     """);
             });
         }
-        // Later versions: if (version < 4) { ALTER ...; PRAGMA user_version = 4; }
+        if (version < 4)
+        {
+            InTransaction(() => Exec("""
+                ALTER TABLE files ADD COLUMN legacy_fingerprint TEXT NULL;
+                CREATE INDEX files_legacy_fingerprint ON files(legacy_fingerprint);
+                CREATE TABLE legacy_fingerprints(fingerprint TEXT PRIMARY KEY);
+                INSERT INTO legacy_fingerprints SELECT DISTINCT fingerprint FROM files
+                  WHERE size > 65536 AND fingerprint IS NOT NULL;
+                UPDATE files SET legacy_fingerprint = fingerprint, fingerprint = NULL
+                  WHERE size > 65536 AND fingerprint IS NOT NULL;
+                PRAGMA user_version = 4;
+                """));
+        }
     }
 
     public void Dispose()
@@ -214,7 +226,9 @@ public sealed class LibraryIndex : IDisposable
                     VALUES($path, $size, $mtime, $taken, $exif, $camera, $fp)
                     ON CONFLICT(path) DO UPDATE SET size = excluded.size, mtime_ticks = excluded.mtime_ticks,
                       taken_ticks = excluded.taken_ticks, exif_taken = excluded.exif_taken,
-                      camera = excluded.camera, fingerprint = excluded.fingerprint
+                      camera = excluded.camera, fingerprint = excluded.fingerprint,
+                      legacy_fingerprint = CASE WHEN files.size = excluded.size AND files.mtime_ticks = excluded.mtime_ticks
+                        THEN files.legacy_fingerprint ELSE NULL END
                     """);
                 var path = cmd.Parameters.Add("$path", SqliteType.Text);
                 var size = cmd.Parameters.Add("$size", SqliteType.Integer);
@@ -315,30 +329,117 @@ public sealed class LibraryIndex : IDisposable
 
     /// Many SetFingerprint calls in one transaction.
     public int SetFingerprints(IEnumerable<(string Path, string Fingerprint, long? Size, long? MtimeTicks)> items)
+        => SetFingerprintsWithLegacy(items.Select(i => (i.Path, i.Fingerprint, i.Size, i.MtimeTicks, (string?)null)));
+
+    internal bool NeedsFingerprintMigration
+    {
+        get { lock (_gate) return Scalar<long>("SELECT EXISTS(SELECT 1 FROM legacy_fingerprints)") != 0; }
+    }
+
+    internal int SetFingerprintsWithLegacy(IEnumerable<(string Path, string Fingerprint, long? Size, long? MtimeTicks, string? Legacy)> items)
     {
         lock (_gate)
         {
             int changed = 0;
+            bool migrating = NeedsFingerprintMigration;
             InTransaction(() =>
             {
                 using var cmd = Command("""
-                    UPDATE files SET fingerprint = $fp WHERE path = $p
+                    UPDATE files SET fingerprint = $fp,
+                      legacy_fingerprint = COALESCE(legacy_fingerprint,
+                        (SELECT fingerprint FROM legacy_fingerprints WHERE fingerprint = $legacy))
+                      WHERE path = $p
                       AND ($size IS NULL OR size = $size) AND ($mtime IS NULL OR mtime_ticks = $mtime)
                     """);
                 var fp = cmd.Parameters.Add("$fp", SqliteType.Text);
                 var p = cmd.Parameters.Add("$p", SqliteType.Text);
                 var size = cmd.Parameters.Add("$size", SqliteType.Integer);
                 var mtime = cmd.Parameters.Add("$mtime", SqliteType.Integer);
+                var legacy = cmd.Parameters.Add("$legacy", SqliteType.Text);
                 foreach (var item in items)
                 {
                     fp.Value = item.Fingerprint;
                     p.Value = item.Path;
                     size.Value = item.Size is { } s ? s : DBNull.Value;
                     mtime.Value = item.MtimeTicks is { } m ? m : DBNull.Value;
-                    changed += cmd.ExecuteNonQuery();
+                    legacy.Value = (object?)item.Legacy ?? DBNull.Value;
+                    int updated = cmd.ExecuteNonQuery();
+                    changed += updated;
+                    if (updated != 0 && migrating)
+                    {
+                        using var old = Command("SELECT legacy_fingerprint FROM files WHERE path = $p", ("$p", item.Path));
+                        if (old.ExecuteScalar() is string key && key != item.Fingerprint)
+                            CopyIdentityMetadata(key, item.Fingerprint);
+                    }
                 }
             });
             return changed;
+        }
+    }
+
+    private void CopyIdentityMetadata(string old, string current)
+    {
+        Exec("""
+            INSERT INTO tags(fingerprint, name, source, created)
+              SELECT $new, name, source, created FROM tags WHERE fingerprint = $old
+              ON CONFLICT(fingerprint, name) DO UPDATE SET
+                source = CASE WHEN excluded.source = 'manual' THEN 'manual' ELSE tags.source END,
+                created = MIN(tags.created, excluded.created);
+            INSERT OR IGNORE INTO stack_overrides(fingerprint, manual_group, keep_apart, is_cover)
+              SELECT $new, manual_group, keep_apart, is_cover FROM stack_overrides WHERE fingerprint = $old;
+            """, ("$old", old), ("$new", current));
+        // Analysis describes pixels, so it must be recomputed after a sampled collision.
+    }
+
+    internal void FinishFingerprintMigration()
+    {
+        var pending = new List<string>();
+        lock (_gate)
+        {
+            using var cmd = Command("""
+                SELECT DISTINCT f.legacy_fingerprint FROM files f
+                  WHERE f.legacy_fingerprint IS NOT NULL
+                    AND EXISTS(SELECT 1 FROM legacy_fingerprints l WHERE l.fingerprint = f.legacy_fingerprint)
+                """);
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) pending.Add(r.GetString(0));
+        }
+        foreach (string old in pending)
+        {
+            // Each old identity commits separately so large upgrades do not hold
+            // the database lock for the entire library.
+            lock (_gate) InTransaction(() =>
+            {
+                var identities = new HashSet<string>(StringComparer.Ordinal);
+                bool incomplete = false;
+                using (var cmd = Command("SELECT fingerprint FROM files WHERE legacy_fingerprint = $old", ("$old", old)))
+                using (var r = cmd.ExecuteReader())
+                    while (r.Read()) { if (r.IsDBNull(0)) incomplete = true; else identities.Add(r.GetString(0)); }
+                // Missing files can return later; keep their legacy metadata until verified.
+                if (incomplete || identities.Count == 0) return;
+                if (identities.Count == 1)
+                {
+                    string current = identities.Single();
+                    if (current != old) Exec("""
+                        UPDATE versions SET original_fingerprint = $new WHERE original_fingerprint = $old;
+                        INSERT OR IGNORE INTO versions(version_fingerprint, original_fingerprint, created)
+                          SELECT $new, original_fingerprint, created FROM versions
+                            WHERE version_fingerprint = $old AND original_fingerprint != $new;
+                        DELETE FROM versions WHERE version_fingerprint = $old;
+                        DELETE FROM versions WHERE version_fingerprint = original_fingerprint;
+                        """, ("$old", old), ("$new", current));
+                }
+                // Ambiguous version links stay stored under the old key, not guessed.
+                if (!identities.Contains(old)) Exec("""
+                    DELETE FROM tags WHERE fingerprint = $old;
+                    DELETE FROM stack_overrides WHERE fingerprint = $old;
+                    DELETE FROM analysis WHERE fingerprint = $old;
+                    """, ("$old", old));
+                Exec("""
+                    UPDATE files SET legacy_fingerprint = NULL WHERE legacy_fingerprint = $old;
+                    DELETE FROM legacy_fingerprints WHERE fingerprint = $old;
+                    """, ("$old", old));
+            });
         }
     }
 

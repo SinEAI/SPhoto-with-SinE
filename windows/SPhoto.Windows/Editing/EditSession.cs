@@ -21,6 +21,8 @@ internal sealed class EditSession
     private readonly List<EditState> _history = new() { EditState.Original };
     private int _historyPos;
     private readonly DispatcherQueueTimer _commitTimer;
+    private int _fullWidth, _fullHeight;
+    private long _sourceLength, _sourceMtime;
 
     internal EditSession(string path)
     {
@@ -54,7 +56,14 @@ internal sealed class EditSession
 
     internal async Task LoadAsync()
     {
-        Source = await Task.Run(() => ImageIO.DecodeAsync(Path, ImageIO.MaxEditSide, bgra: false));
+        var before = new FileInfo(Path);
+        _sourceLength = before.Length;
+        _sourceMtime = before.LastWriteTimeUtc.Ticks;
+        var decoded = await Task.Run(() => ImageIO.DecodeWithSizeAsync(Path, ImageIO.MaxEditSide, bgra: false));
+        EnsureOriginalUnchanged();
+        Source = decoded.Pixels;
+        _fullWidth = decoded.FullWidth;
+        _fullHeight = decoded.FullHeight;
         Changed?.Invoke(false);
     }
 
@@ -62,7 +71,7 @@ internal sealed class EditSession
     internal (int Width, int Height) OutputSize(Geometry geometry)
     {
         if (Source is null) return (1, 1);
-        Native.sp_geometry_output_size(ref geometry, Source.Width, Source.Height, out var w, out var h);
+        Native.sp_geometry_output_size(ref geometry, _fullWidth, _fullHeight, out var w, out var h);
         return (w, h);
     }
 
@@ -182,11 +191,33 @@ internal sealed class EditSession
         CommitNow();
         var state = State;
         var source = Source;
-        var pixels = await Task.Run(() => PhotoRenderer.RenderFull(source, state));
+        var pixels = await Task.Run(async () =>
+        {
+            // The GPU-limited working image is enough for ordinary photos.
+            // Larger originals are decoded at their own size only for CPU export.
+            if (source.Width != _fullWidth || source.Height != _fullHeight)
+            {
+                EnsureOriginalUnchanged();
+                if ((long)_fullWidth * _fullHeight > Array.MaxLength / 4)
+                    throw new InvalidOperationException("图像像素过多，无法按原始尺寸导出");
+                source = await ImageIO.DecodeAsync(Path, int.MaxValue, bgra: false);
+                EnsureOriginalUnchanged();
+                if (source.Width != _fullWidth || source.Height != _fullHeight)
+                    throw new InvalidOperationException("原图尺寸已改变，请重新打开后再保存");
+            }
+            return PhotoRenderer.RenderFull(source, state);
+        });
         await ImageIO.EncodeAsync(pixels, target, Path);
         Saved = state;
         LastSaved = target;
         Changed?.Invoke(false);
+    }
+
+    private void EnsureOriginalUnchanged()
+    {
+        var file = new FileInfo(Path);
+        if (!file.Exists || file.Length != _sourceLength || file.LastWriteTimeUtc.Ticks != _sourceMtime)
+            throw new InvalidOperationException("原图已改变，请重新打开后再保存");
     }
 
     internal async Task<string> SaveCopyAsync()
