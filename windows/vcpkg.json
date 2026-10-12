@@ -1,0 +1,5 @@
+{
+  "name": "sphoto-windows",
+  "version-string": "0.1.0",
+  "dependencies": ["angle"]
+}

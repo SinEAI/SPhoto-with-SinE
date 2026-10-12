@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "SPhoto editor" },
+    { "name": "EntryAbility_desc", "value": "SPhoto editor" },
+    { "name": "EntryAbility_label", "value": "SPhoto" }
+  ]
+}

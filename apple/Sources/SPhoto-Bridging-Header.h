@@ -1,0 +1,1 @@
+#include "sphoto/sphoto.h"

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The photo library without any Windows dependency: the index, EXIF,
+       fingerprints, stacking and versions. Plain .NET so it is tested on
+       Linux in CI; the WinUI app references it. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>SPhoto.Library</RootNamespace>
+    <AssemblyName>SPhoto.Library</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Brings e_sqlite3 for every runtime (win-x64, win-arm64, linux-x64...)
+         through SQLitePCLRaw.bundle_e_sqlite3, so a self-contained publish
+         ships the native library next to the app. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <InternalsVisibleTo Include="SPhoto.Library.Tests" />
+  </ItemGroup>
+</Project>

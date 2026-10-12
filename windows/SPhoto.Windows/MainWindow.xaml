@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="SPhoto.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="SPhoto">
+    <!-- The current design (Ui/Design.cs) is put in here. -->
+    <Grid x:Name="Host" Background="White" />
+</Window>

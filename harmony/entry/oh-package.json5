@@ -1,0 +1,11 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "SPhoto entry module",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {
+    "libsphoto.so": "file:./src/main/cpp/types/libsphoto"
+  }
+}

@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>SPhoto</RootNamespace>
+    <AssemblyName>SPhoto</AssemblyName>
+    <!-- CI appends the run number: -p:Version=0.2.0.<run> (ci.yml). Shown in
+         Settings > 关于 through Services/AppInfo.cs. -->
+    <Version>0.2.0</Version>
+    <FileVersion>$(Version)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\SPhoto.ico</ApplicationIcon>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <!-- Builds the resource index (.pri) and compiled XAML (.xbf) into the
+         output and publish folders; without it an unpackaged publish cannot
+         find ms-appx:///MainWindow.xaml and crashes at startup. -->
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Program.cs provides Main so startup errors can be reported. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
+  </ItemGroup>
+
+  <!-- The photo library (index, EXIF, stacks, versions), plain .NET and
+       tested on Linux. Its Microsoft.Data.Sqlite dependency brings
+       e_sqlite3.dll for win-x64 and win-arm64 into the publish folder. -->
+  <ItemGroup>
+    <ProjectReference Include="..\SPhoto.Library\SPhoto.Library.csproj" />
+  </ItemGroup>
+
+  <!-- Read by MainWindow.DiagnoseXaml when the window fails to load. -->
+  <ItemGroup>
+    <EmbeddedResource Include="MainWindow.xaml" LogicalName="MainWindow.xaml" />
+    <Content Include="Assets\SPhoto.ico;Assets\SPhoto.png;Assets\Tile70.png;Assets\Tile150.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="SPhoto.VisualElementsManifest.xml" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- sphoto_core.dll, ANGLE's libEGL.dll and libGLESv2.dll and the app-local
+       Visual C++ runtime, put in windows/native/<Platform>/ by
+       windows/build-native.ps1. -->
+  <ItemGroup Condition="Exists('..\native\$(Platform)')">
+    <None Include="..\native\$(Platform)\*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
