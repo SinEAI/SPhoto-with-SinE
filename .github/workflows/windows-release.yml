@@ -99,6 +99,47 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  runtime-tests:
+    if: github.ref == 'refs/heads/codex/sphoto-work'
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: windows-x64-release
+          path: artifacts
+      - name: Verify the tested build
+        shell: pwsh
+        run: |
+          $manifest = Get-Content artifacts/release-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.source_commit -ne $env:GITHUB_SHA) { throw 'tested build commit mismatch' }
+          foreach ($line in Get-Content artifacts/SHA256SUMS.txt) {
+            $parts = $line -split '  ', 2
+            $actual = (Get-FileHash (Join-Path artifacts $parts[1]) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $parts[0]) { throw 'tested asset checksum mismatch' }
+          }
+          $zip = (Get-ChildItem artifacts/SPhoto-*-windows-x64.zip).FullName
+          Expand-Archive $zip -DestinationPath tested-app
+      - name: Run generated-image runtime, 50000-file UI stress and edit-return tests
+        id: diagnostics
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+        run: ./windows/run-runtime-tests.ps1 -Exe "$env:GITHUB_WORKSPACE/tested-app/SPhoto.exe"
+      - name: Upload privacy-checked test results, including failures
+        if: always() && steps.diagnostics.outputs.shareable == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-runtime-results
+          path: runtime-results/*
+          if-no-files-found: error
+          retention-days: 14
+
   release:
     if: always() && startsWith(github.ref, 'refs/tags/v') && (needs.build.result == 'success' || needs.locate.outputs.run_id != '')
     needs: [locate, build]

@@ -36,6 +36,14 @@ public static class Program
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Crash.Report(e.ExceptionObject);
         try
         {
+            if (args.Length > 0 && args[0] == "--runtime-test")
+            {
+                return RuntimeTest.Run(args.Length > 1 ? args[1] : "runtime-results.json");
+            }
+            if (args.Length > 1 && args[0] == "--runtime-probe")
+            {
+                return RuntimeTest.Probe(args[1]);
+            }
             if (args.Length > 0 && args[0] == "--self-test")
             {
                 return SelfTest.Run(args.Length > 1 ? args[1] : "self-test.log");

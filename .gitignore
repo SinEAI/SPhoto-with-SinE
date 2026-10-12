@@ -4,6 +4,8 @@
 /release/
 /dist/
 /artifacts/
+/runtime-results/
+/tested-app/
 /.cache/
 __pycache__/
 *.pyc

@@ -102,7 +102,7 @@ internal static class StressTest
     private static async Task RunAsync(UiTestLog log)
     {
         var photos = Path.Combine(_root, "photos");
-        log.Note($"{_count:N0} photos in {photos}, data in {PhotoLibrary.DataDir}");
+        log.Note($"{_count:N0} generated photos in an isolated temporary profile");
 
         var watch = Stopwatch.StartNew();
         await Task.Run(() => WritePhotosAsync(photos, _count));
@@ -180,7 +180,7 @@ internal static class StressTest
             }
             var stats = ThumbnailLoader.Stats;
             log.Note($"cold pass: thumbnails within 1 s at each step {Summary(within1s)}; " +
-                     $"loader {stats.Hits} hits, {stats.Misses} made, {stats.Cancelled} cancelled unstarted, {stats.Failed} failed");
+                     $"loader {stats.Hits} hits, {stats.Misses} made, {stats.Cancelled} cancelled waits, {stats.Failed} failed");
 
             // 4. Back to the top: recent thumbnails, then the disk cache.
             scroller.ChangeView(null, 0, null, disableAnimation: true);
