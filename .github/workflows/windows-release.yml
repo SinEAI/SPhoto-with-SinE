@@ -20,7 +20,6 @@ jobs:
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_NOLOGO: '1'
-      NUGET_PACKAGES: ${{ runner.temp }}/nuget
       VCPKG_DISABLE_METRICS: '1'
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg
     steps:
@@ -56,6 +55,7 @@ jobs:
           & "$vcpkgRoot/bootstrap-vcpkg.bat" -disableMetrics
           if ($LASTEXITCODE) { throw 'vcpkg bootstrap failed' }
           "VCPKG_ROOT=$vcpkgRoot" >> $env:GITHUB_ENV
+          "NUGET_PACKAGES=$(Join-Path $env:RUNNER_TEMP 'nuget')" >> $env:GITHUB_ENV
       - name: Build, test, package and check Windows x64
         shell: pwsh
         run: ./windows/build-release.ps1 -Version "0.2.0.$env:GITHUB_RUN_NUMBER"
