@@ -67,6 +67,15 @@ class ContentTests(unittest.TestCase):
         self.assertIn("filename:private-email", self.rules(path, b"safe"))
         self.assertNotIn("person@", check.display_path(path))
 
+    def test_public_license_contacts_have_a_precise_exception(self):
+        data = "\n".join(sorted(check.ZLIB_LICENSE_CONTACTS)).encode()
+        self.assertFalse(self.rules("third-party-notices/zlib.txt", data))
+        self.assertIn("private-email", self.rules("ordinary.txt", data))
+        token = ("gh" + "p_" + "L" * 36).encode()
+        self.assertIn("github-token", self.rules("third-party-notices/zlib.txt", data + b"\n" + token))
+        for email in check.ZLIB_LICENSE_CONTACTS:
+            self.assertFalse(check.public_identity(email))
+
 
 class GitBoundaryTests(unittest.TestCase):
     def setUp(self):

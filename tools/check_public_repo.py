@@ -29,6 +29,9 @@ OFFICIAL_EMAILS = {"noreply@github.com", "web-flow@github.com"}
 EXAMPLE_DOMAINS = {"example.com", "example.org", "example.net"}
 GENERIC_USERS = {b"runner", b"runneradmin", b"agent", b"user", b"username", b"example", b"public"}
 PLACEHOLDERS = {b"placeholder", b"redacted", b"example", b"changeme", b"<redacted>"}
+# Public author contacts required by zlib's upstream LICENSE, not user data.
+# https://github.com/madler/zlib/blob/v1.3.1/LICENSE
+ZLIB_LICENSE_CONTACTS = {"jloup@gzip.org", "madler@alumni.caltech.edu"}
 SENSITIVE_SUFFIXES = {".log", ".dmp", ".pdb", ".db", ".sqlite", ".sqlite3", ".pfx", ".p12", ".pem", ".key", ".jks", ".keystore"}
 MAX_MEMBER = 20 * 1024 * 1024
 MAX_ARCHIVE = 100 * 1024 * 1024
@@ -43,7 +46,7 @@ def public_identity(email):
     return bool(re.fullmatch(r"[a-z0-9+_.\[\]-]+@users\.noreply\.github\.com", email)) or email in OFFICIAL_EMAILS
 
 
-def issues_in_text(data):
+def issues_in_text(data, public_license_contacts=frozenset()):
     issues = []
     for name, pattern in PATTERNS.items():
         for match in pattern.finditer(data):
@@ -54,7 +57,7 @@ def issues_in_text(data):
             issues.append((data[:match.start()].count(b"\n") + 1, name))
     for match in EMAIL.finditer(data):
         email = match.group().decode("ascii").lower()
-        if not public_identity(email) and email.rsplit("@", 1)[-1] not in EXAMPLE_DOMAINS:
+        if not public_identity(email) and email.rsplit("@", 1)[-1] not in EXAMPLE_DOMAINS and email not in public_license_contacts:
             issues.append((data[:match.start()].count(b"\n") + 1, "private-email"))
     for match in USER_PATH.finditer(data):
         username = match.group(1).lower()
@@ -79,7 +82,9 @@ def display_path(path):
 
 
 def scan_blob(path, data, depth=0):
-    issues = issues_in_text(data)
+    # Exact paths and exact upstream addresses only; no directory exemption.
+    contacts = ZLIB_LICENSE_CONTACTS if path in {"third-party-notices/zlib.txt", "tools/check_public_repo.py"} else frozenset()
+    issues = issues_in_text(data, contacts)
     issues.extend((1, "filename:" + rule) for _, rule in issues_in_text(os.fsencode(path)))
     name = PurePosixPath(path).name.lower()
     suffix = PurePosixPath(path).suffix.lower()
@@ -88,7 +93,7 @@ def scan_blob(path, data, depth=0):
             or any(part in {".aws", ".ssh"} for part in PurePosixPath(path).parts)):
         issues.append((1, "sensitive-file"))
     if b"\0" in data:
-        issues.extend(issues_in_text(data.replace(b"\0", b"")))
+        issues.extend(issues_in_text(data.replace(b"\0", b""), contacts))
         is_image = data.startswith((b"\xff\xd8\xff", b"II*\0", b"MM\0*")) or data[:4] == b"RIFF" and data[8:12] == b"WEBP"
         if is_image and (b"Exif\0\0" in data or b"http://ns.adobe.com/xap/1.0/" in data):
             issues.append((1, "image-metadata"))

@@ -95,5 +95,5 @@ $hashes = @($zip, $installer, "$artifacts/release-manifest.json") | ForEach-Obje
     $hash = Get-FileHash -Algorithm SHA256 $_
     "$($hash.Hash.ToLowerInvariant())  $(Split-Path $_ -Leaf)"
 }
-$hashes | Set-Content "$artifacts/SHA256SUMS.txt" -Encoding ascii
+[IO.File]::WriteAllText("$artifacts/SHA256SUMS.txt", ($hashes -join "`n") + "`n", [Text.Encoding]::ASCII)
 Write-Host "Windows release $Version built, tested and privacy checked."
