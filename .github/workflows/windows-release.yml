@@ -2,6 +2,8 @@ name: Windows build and release
 
 on:
   push:
+    branches:
+      - codex/sphoto-work
     tags:
       - 'v[0-9]*'
   workflow_dispatch:
@@ -14,7 +16,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  locate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run_id: ${{ steps.find.outputs.run_id }}
+    steps:
+      - name: Find a verified branch build for this exact commit
+        id: find
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=""
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow windows-release.yml --branch codex/sphoto-work --commit "$GITHUB_SHA" --limit 20 --json databaseId,status,conclusion --jq 'map(select(.status == "completed" and .conclusion == "success")) | .[0].databaseId // ""')
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: locate
+    if: needs.locate.outputs.run_id == ''
     runs-on: windows-2022
     timeout-minutes: 90
     env:
@@ -76,8 +100,8 @@ jobs:
           retention-days: 14
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    if: always() && startsWith(github.ref, 'refs/tags/v') && (needs.build.result == 'success' || needs.locate.outputs.run_id != '')
+    needs: [locate, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -90,6 +114,8 @@ jobs:
         with:
           name: windows-x64-release
           path: artifacts
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.locate.outputs.run_id || github.run_id }}
       - name: Verify uploaded digests and distribution
         run: |
           cd artifacts

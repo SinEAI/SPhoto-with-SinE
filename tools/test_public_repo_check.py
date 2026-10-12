@@ -66,6 +66,19 @@ class ContentTests(unittest.TestCase):
         data = ("C:" + "\\Users\\" + "私人测试\\photo.jpg\0").encode("utf-16le")
         self.assertIn("personal-path", self.rules("sample.bin", data))
 
+    def test_pe_machine_bytes_are_not_mistaken_for_contact_strings(self):
+        address = b"synthetic@" + b"invalid.test"
+        data = b"MZ\0\xff" + address + b"\xff"
+        self.assertFalse(self.rules("sample.dll", data))
+        self.assertIn("private-email", self.rules("sample.dll", b"MZ\0" + address + b"\0"))
+        token = ("gh" + "p_" + "Q" * 36).encode()
+        self.assertIn("github-token", self.rules("sample.dll", data + b"\xff" + token + b"\xff"))
+
+    def test_verified_winui_event_identifier_is_not_a_mailbox(self):
+        text = "resource@" + "Microsoft.UI.Xaml.Controls.Frame.NavigationFailed"
+        self.assertFalse(self.rules("resource.dll", b"MZ\0" + text.encode("utf-16le") + b"\0\0"))
+        self.assertIn("private-email", self.rules("ordinary.txt", text.encode()))
+
     def test_coauthor_must_use_github_even_for_example_email(self):
         self.assertIn((1, "non-github-trailer-identity"), check.issues_in_message(b"Co-authored-by: Example <person@example.com>"))
 

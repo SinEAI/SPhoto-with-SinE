@@ -1,49 +1,5 @@
 [
   {
-    "file": "SQLitePCLRaw.core.dll",
-    "sha256": "3d2ed8e186f124f988ebdb45d0354185b424357be2433bba0033ab9ec31bd25b",
-    "package": "sqlitepclraw.core.2.1.11.nupkg",
-    "member": "lib/netstandard2.0/SQLitePCLRaw.core.dll",
-    "allowed_rules": [
-      "personal-path"
-    ],
-    "reason": "Unmodified official NuGet assembly contains the publicly distributed upstream PDB build reference; preserving original assembly identity.",
-    "source_url": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.core/2.1.11/sqlitepclraw.core.2.1.11.nupkg"
-  },
-  {
-    "file": "SQLitePCLRaw.batteries_v2.dll",
-    "sha256": "94ac800c6b93ae50a025f247547781debe18391110667c5e242f51d8ac188ffb",
-    "package": "sqlitepclraw.bundle_e_sqlite3.2.1.11.nupkg",
-    "member": "lib/netstandard2.0/SQLitePCLRaw.batteries_v2.dll",
-    "allowed_rules": [
-      "personal-path"
-    ],
-    "reason": "Unmodified official NuGet assembly contains the publicly distributed upstream PDB build reference; preserving original assembly identity.",
-    "source_url": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.bundle_e_sqlite3/2.1.11/sqlitepclraw.bundle_e_sqlite3.2.1.11.nupkg"
-  },
-  {
-    "file": "SQLitePCLRaw.provider.e_sqlite3.dll",
-    "sha256": "232990c8372aff30574eef9cc280b486ee6f39f8a66f83ea495dd0dbae98740c",
-    "package": "sqlitepclraw.provider.e_sqlite3.2.1.11.nupkg",
-    "member": "lib/net6.0/SQLitePCLRaw.provider.e_sqlite3.dll",
-    "allowed_rules": [
-      "personal-path"
-    ],
-    "reason": "Unmodified official NuGet assembly contains the publicly distributed upstream PDB build reference; preserving original assembly identity.",
-    "source_url": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.provider.e_sqlite3/2.1.11/sqlitepclraw.provider.e_sqlite3.2.1.11.nupkg"
-  },
-  {
-    "file": "SQLitePCLRaw.provider.e_sqlite3.dll",
-    "sha256": "60ab6cfa2f3cc907bcee4d0c1264d5c36de0a3da701dbebf5efc9d542ce69fa2",
-    "package": "sqlitepclraw.provider.e_sqlite3.2.1.11.nupkg",
-    "member": "lib/net6.0-windows7.0/SQLitePCLRaw.provider.e_sqlite3.dll",
-    "allowed_rules": [
-      "personal-path"
-    ],
-    "reason": "Unmodified official NuGet assembly contains the publicly distributed upstream PDB build reference; preserving original assembly identity.",
-    "source_url": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.provider.e_sqlite3/2.1.11/sqlitepclraw.provider.e_sqlite3.2.1.11.nupkg"
-  },
-  {
     "file": "Microsoft.UI.Xaml/Assets/NoiseAsset_256x256_PNG.png",
     "sha256": "4f2aa94a2e345a32dae689176b86c644bef87081ff9daef8c77417731862031b",
     "package": "microsoft.windowsappsdk.winui.2.3.9.nupkg",
@@ -53,5 +9,49 @@
     ],
     "reason": "Unmodified official Microsoft noise texture has a Software=Adobe ImageReady text chunk only; no author, location or EXIF metadata.",
     "source_url": "https://api.nuget.org/v3-flatcontainer/microsoft.windowsappsdk.winui/2.3.9/microsoft.windowsappsdk.winui.2.3.9.nupkg"
+  },
+  {
+    "file": "SQLitePCLRaw.core.dll",
+    "sha256": "af340ac9eb9195795660d7fc1114f486b6ab63998f33176e2f24c8e0acb9aa84",
+    "package": "sqlitepclraw.core.2.1.12.nupkg",
+    "member": "lib/netstandard2.0/SQLitePCLRaw.core.dll",
+    "allowed_rules": [
+      "personal-path"
+    ],
+    "reason": "Unmodified official NuGet assembly contains the publicly distributed upstream PDB build reference; preserving original assembly identity.",
+    "source_url": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.core/2.1.12/sqlitepclraw.core.2.1.12.nupkg"
+  },
+  {
+    "file": "SQLitePCLRaw.batteries_v2.dll",
+    "sha256": "815ce410c9eab531dd219318e3ba16c5e38e83d361cfbbdbb4bbca222c497b0b",
+    "package": "sqlitepclraw.bundle_e_sqlite3.2.1.12.nupkg",
+    "member": "lib/netstandard2.0/SQLitePCLRaw.batteries_v2.dll",
+    "allowed_rules": [
+      "personal-path"
+    ],
+    "reason": "Unmodified official NuGet assembly contains the publicly distributed upstream PDB build reference; preserving original assembly identity.",
+    "source_url": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.bundle_e_sqlite3/2.1.12/sqlitepclraw.bundle_e_sqlite3.2.1.12.nupkg"
+  },
+  {
+    "file": "SQLitePCLRaw.provider.e_sqlite3.dll",
+    "sha256": "df996bcae63c2cabcfe8d4b9c5110eb39a2a4706178b07d875665391c6eb3995",
+    "package": "sqlitepclraw.provider.e_sqlite3.2.1.12.nupkg",
+    "member": "lib/net6.0/SQLitePCLRaw.provider.e_sqlite3.dll",
+    "allowed_rules": [
+      "personal-path"
+    ],
+    "reason": "Unmodified official NuGet assembly contains the publicly distributed upstream PDB build reference; preserving original assembly identity.",
+    "source_url": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.provider.e_sqlite3/2.1.12/sqlitepclraw.provider.e_sqlite3.2.1.12.nupkg"
+  },
+  {
+    "file": "SQLitePCLRaw.provider.e_sqlite3.dll",
+    "sha256": "eb6696e55882c3000333146b1cd4970439601e11fdedae941105ca921f615bd6",
+    "package": "sqlitepclraw.provider.e_sqlite3.2.1.12.nupkg",
+    "member": "lib/net6.0-windows7.0/SQLitePCLRaw.provider.e_sqlite3.dll",
+    "allowed_rules": [
+      "personal-path"
+    ],
+    "reason": "Unmodified official NuGet assembly contains the publicly distributed upstream PDB build reference; preserving original assembly identity.",
+    "source_url": "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.provider.e_sqlite3/2.1.12/sqlitepclraw.provider.e_sqlite3.2.1.12.nupkg"
   }
 ]

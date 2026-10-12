@@ -24,6 +24,7 @@ RULES = {
 PATTERNS = {name: re.compile(pattern) for name, pattern in RULES.items()}
 UTF16_LE_TEXT = re.compile(rb"(?:[\t\n\r\x20-\x7e]\x00){4,}")
 UTF16_BE_TEXT = re.compile(rb"(?:\x00[\t\n\r\x20-\x7e]){4,}")
+ASCII_TEXT = re.compile(rb"[\t\n\r\x20-\x7e]{4,}")
 UTF16_LE_PATH = re.compile(rb"(?i)(?:[A-Z]\x00:\x00(?:[\\/]\x00)+U\x00s\x00e\x00r\x00s\x00(?:[\\/]\x00)+|/\x00(?:U\x00s\x00e\x00r\x00s\x00|h\x00o\x00m\x00e\x00)/\x00)")
 EMAIL = re.compile(rb"(?i)\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b")
 IDENTITY_TRAILER = re.compile(rb"(?im)^(?:co-authored-by|signed-off-by|reviewed-by|acked-by|tested-by):[^\r\n]*<([^<>\r\n]+)>")
@@ -49,7 +50,7 @@ def public_identity(email):
     return bool(re.fullmatch(r"[a-z0-9+_.\[\]-]+@users\.noreply\.github\.com", email)) or email in OFFICIAL_EMAILS
 
 
-def issues_in_text(data, public_license_contacts=frozenset()):
+def issues_in_text(data, public_license_contacts=frozenset(), binary_literal=False):
     issues = []
     for name, pattern in PATTERNS.items():
         for match in pattern.finditer(data):
@@ -60,6 +61,9 @@ def issues_in_text(data, public_license_contacts=frozenset()):
             issues.append((data[:match.start()].count(b"\n") + 1, name))
     for match in EMAIL.finditer(data):
         email = match.group().decode("ascii").lower()
+        if binary_literal and email.rsplit("@", 1)[-1] == "microsoft.ui.xaml.controls.frame.navigationfailed":
+            # A verified WinUI type/event resource identifier, not a mailbox.
+            continue
         if not public_identity(email) and email.rsplit("@", 1)[-1] not in EXAMPLE_DOMAINS and email not in public_license_contacts:
             issues.append((data[:match.start()].count(b"\n") + 1, "private-email"))
     for match in USER_PATH.finditer(data):
@@ -88,6 +92,18 @@ def scan_blob(path, data, depth=0):
     # Exact paths and exact upstream addresses only; no directory exemption.
     contacts = ZLIB_LICENSE_CONTACTS if path in {"third-party-notices/zlib.txt", "tools/check_public_repo.py"} else frozenset()
     issues = issues_in_text(data, contacts)
+    is_pe = data.startswith(b"MZ")
+    if is_pe:
+        # Machine instructions can resemble short addresses. Read contacts
+        # from actual string literals; scan credential markers everywhere.
+        issues = [(line, rule) for line, rule in issues if rule not in {"private-email", "personal-path"}]
+        for match in ASCII_TEXT.finditer(data):
+            if match.end() != len(data) and data[match.end()] != 0:
+                continue
+            literal_issues = issues_in_text(match.group(), contacts, binary_literal=True)
+            if literal_issues:
+                base_line = data[:match.start()].count(b"\n")
+                issues.extend((base_line + line, rule) for line, rule in literal_issues)
     issues.extend((1, "filename:" + rule) for _, rule in issues_in_text(os.fsencode(path)))
     name = PurePosixPath(path).name.lower()
     suffix = PurePosixPath(path).suffix.lower()
@@ -101,7 +117,7 @@ def scan_blob(path, data, depth=0):
         for pattern, encoding in ((UTF16_LE_TEXT, "utf-16le"), (UTF16_BE_TEXT, "utf-16be")):
             for match in pattern.finditer(data):
                 text = match.group().decode(encoding).encode("utf-8")
-                decoded_issues = issues_in_text(text, contacts)
+                decoded_issues = issues_in_text(text, contacts, binary_literal=is_pe)
                 if decoded_issues:
                     base_line = data[:match.start()].count(b"\n")
                     issues.extend((base_line + line, rule) for line, rule in decoded_issues)
