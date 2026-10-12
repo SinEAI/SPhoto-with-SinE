@@ -1,12 +1,15 @@
 """Release boundary tests with synthetic distribution files."""
 
 import io
+import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 import check_public_repo
@@ -60,6 +63,26 @@ class ReleaseTests(unittest.TestCase):
             result = subprocess.run([sys.executable, str(Path(check_release.__file__).resolve()), "--text-file", str(path)], env=env, capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertIn("合成界面测试", result.stdout)
+
+    def test_upstream_reference_requires_exact_content_and_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = b"MZ\0" + b"/home/" + b"synthetic-upstream/build/example.pdb\0"
+            records = Path(directory) / "records.json"
+            records.write_text(json.dumps([{"file":"upstream.dll", "sha256":hashlib.sha256(data).hexdigest(), "allowed_rules":["personal-path"]}]))
+            with patch.object(check_release, "UPSTREAM_RECORDS", records):
+                self.assertIn("verified_public_upstream_reference", check_release.check_files([("upstream.dll", data)])[0])
+                for name, content in (("changed.dll", data), ("upstream.dll", data + b"changed")):
+                    with self.assertRaises(ValueError):
+                        check_release.check_files([(name, content)])
+
+    def test_upstream_record_cannot_allow_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = b"MZ\0" + ("gh" + "p_" + "H" * 36).encode()
+            records = Path(directory) / "records.json"
+            records.write_text(json.dumps([{"file":"upstream.dll", "sha256":hashlib.sha256(data).hexdigest(), "allowed_rules":["github-token"]}]))
+            with patch.object(check_release, "UPSTREAM_RECORDS", records):
+                with self.assertRaises(ValueError):
+                    check_release.check_files([("upstream.dll", data)])
 
 
 if __name__ == "__main__":

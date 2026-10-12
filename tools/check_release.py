@@ -12,16 +12,26 @@ from check_public_repo import display_path, issues_in_text, scan_blob
 
 
 REQUIRED = {"SPhoto.exe", "SPhoto.dll", "sphoto_core.dll", "libEGL.dll", "libGLESv2.dll", "e_sqlite3.dll"}
+UPSTREAM_RECORDS = Path(__file__).with_name("public-upstream-references.json")
 
 
 def check_files(files):
     failed = False
     manifest = []
+    records = json.loads(UPSTREAM_RECORDS.read_text(encoding="utf-8")) if UPSTREAM_RECORDS.exists() else []
     for name, data in files:
+        digest = hashlib.sha256(data).hexdigest()
+        verified = next((record for record in records if record["file"] == name and record["sha256"] == digest), None)
+        allowed = set(verified["allowed_rules"]) & {"personal-path", "image-metadata"} if verified else set()
         for line, rule in scan_blob(name, data):
+            if rule in allowed:
+                continue
             print(f"{display_path(name)!r}:{line}: {rule}", file=sys.stderr)
             failed = True
-        manifest.append({"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+        entry = {"path": name, "bytes": len(data), "sha256": digest}
+        if verified:
+            entry["verified_public_upstream_reference"] = verified
+        manifest.append(entry)
     if failed:
         raise ValueError("release privacy checks failed")
     return manifest

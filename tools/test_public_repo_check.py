@@ -59,6 +59,13 @@ class ContentTests(unittest.TestCase):
         data = ("person@" + "mail.test").encode("utf-16le")
         self.assertIn("private-email", self.rules("sample.bin", data))
 
+    def test_unrelated_binary_fields_are_not_merged(self):
+        self.assertFalse(self.rules("sample.bin", b"person@\0mail.test\0"))
+
+    def test_utf16_unicode_personal_path_is_checked(self):
+        data = ("C:" + "\\Users\\" + "私人测试\\photo.jpg\0").encode("utf-16le")
+        self.assertIn("personal-path", self.rules("sample.bin", data))
+
     def test_coauthor_must_use_github_even_for_example_email(self):
         self.assertIn((1, "non-github-trailer-identity"), check.issues_in_message(b"Co-authored-by: Example <person@example.com>"))
 

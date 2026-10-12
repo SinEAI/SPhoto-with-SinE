@@ -22,6 +22,9 @@ RULES = {
     "credential-assignment": rb"(?im)\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|client[_-]?secret)\b\s*[\"']?\s*[:=]\s*[\"']([^\"'\r\n]{6,})[\"']",
 }
 PATTERNS = {name: re.compile(pattern) for name, pattern in RULES.items()}
+UTF16_LE_TEXT = re.compile(rb"(?:[\t\n\r\x20-\x7e]\x00){4,}")
+UTF16_BE_TEXT = re.compile(rb"(?:\x00[\t\n\r\x20-\x7e]){4,}")
+UTF16_LE_PATH = re.compile(rb"(?i)(?:[A-Z]\x00:\x00(?:[\\/]\x00)+U\x00s\x00e\x00r\x00s\x00(?:[\\/]\x00)+|/\x00(?:U\x00s\x00e\x00r\x00s\x00|h\x00o\x00m\x00e\x00)/\x00)")
 EMAIL = re.compile(rb"(?i)\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b")
 IDENTITY_TRAILER = re.compile(rb"(?im)^(?:co-authored-by|signed-off-by|reviewed-by|acked-by|tested-by):[^\r\n]*<([^<>\r\n]+)>")
 USER_PATH = re.compile(rb"(?i)(?:[A-Z]:[\\/]+Users[\\/]+|/(?:Users|home)/)([^/\\\s\"'<>]+)")
@@ -93,7 +96,24 @@ def scan_blob(path, data, depth=0):
             or any(part in {".aws", ".ssh"} for part in PurePosixPath(path).parts)):
         issues.append((1, "sensitive-file"))
     if b"\0" in data:
-        issues.extend(issues_in_text(data.replace(b"\0", b""), contacts))
+        # Decode each UTF-16 string independently. Removing all NUL bytes
+        # concatenates unrelated metadata and invents email-shaped strings.
+        for pattern, encoding in ((UTF16_LE_TEXT, "utf-16le"), (UTF16_BE_TEXT, "utf-16be")):
+            for match in pattern.finditer(data):
+                text = match.group().decode(encoding).encode("utf-8")
+                decoded_issues = issues_in_text(text, contacts)
+                if decoded_issues:
+                    base_line = data[:match.start()].count(b"\n")
+                    issues.extend((base_line + line, rule) for line, rule in decoded_issues)
+        # Include non-ASCII usernames in Windows and POSIX UTF-16 paths.
+        for match in UTF16_LE_PATH.finditer(data):
+            end = match.end()
+            limit = min(len(data), end + 4096)
+            while end + 1 < limit and data[end:end + 2] != b"\0\0":
+                end += 2
+            text = data[match.start():end].decode("utf-16le", "replace").encode("utf-8")
+            base_line = data[:match.start()].count(b"\n")
+            issues.extend((base_line + line, rule) for line, rule in issues_in_text(text, contacts))
         is_image = data.startswith((b"\xff\xd8\xff", b"II*\0", b"MM\0*")) or data[:4] == b"RIFF" and data[8:12] == b"WEBP"
         if is_image and (b"Exif\0\0" in data or b"http://ns.adobe.com/xap/1.0/" in data):
             issues.append((1, "image-metadata"))
