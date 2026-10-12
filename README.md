@@ -50,6 +50,10 @@ dotnet build windows/SPhoto.Windows -c Release -p:Platform=x64
 
 图库层是纯 .NET 8，任何系统上都能测试：`dotnet test windows/SPhoto.Library.Tests`。
 
+Windows x64 发布通过 `.github/workflows/windows-release.yml` 完成。推送版本标签后，Windows runner 构建并测试内核、图库、便携程序和界面，再验证安装、卸载与产物脱敏。测试通过才上传安装包、便携 ZIP、文件清单和 SHA-256 校验文件到预览版 Release。原生依赖固定在 `windows/vcpkg.json` 指定的 vcpkg baseline，发布包包含运行依赖和第三方许可说明，不包含调试符号或用户数据。
+
+每次提交、推送和发布都必须脱敏；提交身份使用 GitHub noreply 邮箱。检查与本地 hooks 设置见 `CONTRIBUTING.md`。
+
 **iOS / macOS**：安装 XcodeGen 后执行 `cd apple && xcodegen generate`，用 Xcode 打开 `SPhoto.xcodeproj`。
 
 **安卓**：用 Android Studio 打开 `android/`，或执行 `cd android && ./gradlew installDebug`。

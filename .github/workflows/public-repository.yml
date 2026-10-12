@@ -1,0 +1,22 @@
+name: Public repository checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test privacy checks
+        run: python3 -m unittest discover -s tools -p 'test_*.py'
+      - name: Check every reachable commit and its identity
+        run: python3 tools/check_public_repo.py --history HEAD

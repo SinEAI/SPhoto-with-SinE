@@ -17,7 +17,7 @@ cmake -S "$root/core" -B $build -A $arch `
   "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
   "-DVCPKG_TARGET_TRIPLET=$triplet" `
   "-DVCPKG_MANIFEST_DIR=$root/windows" `
-  "-DSPHOTO_SHARED=ON"
+  "-DSPHOTO_SHARED=ON" "-DSPHOTO_TESTS=OFF" "-DSPHOTO_CLI=OFF"
 if ($LASTEXITCODE) { throw "cmake configure failed" }
 cmake --build $build --config Release
 if ($LASTEXITCODE) { throw "cmake build failed" }
