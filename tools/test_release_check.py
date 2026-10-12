@@ -1,6 +1,7 @@
 """Release boundary tests with synthetic distribution files."""
 
 import io
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -49,6 +50,16 @@ class ReleaseTests(unittest.TestCase):
         token = ("gh" + "p_" + "Z" * 36).encode()
         with self.assertRaises(ValueError):
             check_release.check_files([("setup.exe", b"MZ\0" + token)])
+
+    def test_chinese_diagnostics_work_with_a_legacy_output_encoding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.txt"
+            path.write_text("PASSED\n合成界面测试\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "ascii"
+            result = subprocess.run([sys.executable, str(Path(check_release.__file__).resolve()), "--text-file", str(path)], env=env, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn("合成界面测试", result.stdout)
 
 
 if __name__ == "__main__":

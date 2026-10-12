@@ -49,6 +49,10 @@ def zip_files(path):
 
 
 def main():
+    # GitHub's Windows output pipe may otherwise select a legacy code page.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--directory", type=Path)
