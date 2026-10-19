@@ -51,12 +51,64 @@ public class FingerprintTests
     }
 
     [Fact]
-    public void MiddleOfALargeFileChangesItsIdentity()
+    public void MiddleOfALargeFileIsNotRead()
     {
         var data = Random(200_000, 4);
         var before = Fingerprint.Compute(new MemoryStream(data));
         data[100_000] ^= 1;
-        Assert.NotEqual(before, Fingerprint.Compute(new MemoryStream(data)));
+        Assert.Equal(before, Fingerprint.Compute(new MemoryStream(data)));
+    }
+
+    [Fact]
+    public void FullHashReadsTheMiddleAndMatchesShortFiles()
+    {
+        using var dir = new TempDir();
+        var data = Random(200_000, 5);
+        var a = dir.File("a.jpg", data);
+        data[100_000] ^= 1;
+        var b = dir.File("b.jpg", data);
+        Assert.Equal(Fingerprint.Compute(a), Fingerprint.Compute(b));
+        Assert.NotEqual(Fingerprint.ComputeFull(a), Fingerprint.ComputeFull(b));
+        foreach (int length in new[] { 0, 1000, 2 * Fingerprint.EdgeBytes })
+        {
+            var small = dir.File($"small-{length}.jpg", Random(length, 6));
+            Assert.Equal(Fingerprint.Compute(small), Fingerprint.ComputeFull(small));
+        }
+    }
+
+    private static FileRecord Record(string path)
+    {
+        var info = new FileInfo(path);
+        return new FileRecord(path, info.Length, info.LastWriteTimeUtc.Ticks, null, false, null, null);
+    }
+
+    [Fact]
+    public void FingerprinterSeparatesSampledCollisionsAndKeepsCopies()
+    {
+        using var dir = new TempDir();
+        var data = Random(200_000, 7);
+        var original = dir.File("a.jpg", data);
+        var copy = dir.File("copy/a.jpg", data);
+        var changed = (byte[])data.Clone();
+        changed[100_000] ^= 1;
+        var other = dir.File("b.jpg", changed);
+        using var index = LibraryIndex.Open(":memory:");
+        index.UpsertMany(new[] { original, copy, other }.Select(Record));
+        Assert.Equal(3, Fingerprinter.Run(index));
+
+        string sampled = Fingerprint.Compute(original);
+        Assert.Equal(sampled, index.Known(original)!.Fingerprint);
+        Assert.Equal(sampled, index.Known(copy)!.Fingerprint);
+        Assert.Equal(Fingerprint.ComputeFull(other), index.Known(other)!.Fingerprint);
+
+        // Arrivals in a later run: a copy of each photo finds its own identity.
+        var laterCopy = dir.File("later/a.jpg", data);
+        var laterOther = dir.File("later/b.jpg", changed);
+        index.UpsertMany(new[] { laterCopy, laterOther }.Select(Record));
+        Fingerprinter.Run(index);
+        Assert.Equal(sampled, index.Known(laterCopy)!.Fingerprint);
+        Assert.Equal(index.Known(other)!.Fingerprint, index.Known(laterOther)!.Fingerprint);
+        Assert.Equal(2, index.Catalog().Items(CatalogScope.All).Count);
     }
 
     [Fact]

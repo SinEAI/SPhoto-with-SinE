@@ -3,7 +3,7 @@ name: Windows build and release
 on:
   push:
     branches:
-      - codex/sphoto-work
+      - main
     tags:
       - 'v[0-9]*'
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
         run: |
           run_id=""
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow windows-release.yml --branch codex/sphoto-work --commit "$GITHUB_SHA" --limit 20 --json databaseId,status,conclusion --jq 'map(select(.status == "completed" and .conclusion == "success")) | .[0].databaseId // ""')
+            run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow windows-release.yml --branch main --commit "$GITHUB_SHA" --limit 20 --json databaseId,status,conclusion --jq 'map(select(.status == "completed" and .conclusion == "success")) | .[0].databaseId // ""')
           fi
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
@@ -100,7 +100,7 @@ jobs:
           retention-days: 14
 
   runtime-tests:
-    if: github.ref == 'refs/heads/codex/sphoto-work'
+    if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: windows-2022
     timeout-minutes: 35

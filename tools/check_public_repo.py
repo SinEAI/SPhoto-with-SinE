@@ -30,6 +30,10 @@ EMAIL = re.compile(rb"(?i)\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b")
 IDENTITY_TRAILER = re.compile(rb"(?im)^(?:co-authored-by|signed-off-by|reviewed-by|acked-by|tested-by):[^\r\n]*<([^<>\r\n]+)>")
 USER_PATH = re.compile(rb"(?i)(?:[A-Z]:[\\/]+Users[\\/]+|/(?:Users|home)/)([^/\\\s\"'<>]+)")
 OFFICIAL_EMAILS = {"noreply@github.com", "web-flow@github.com"}
+# Public no-reply address of the Claude coding agent, accepted only as a
+# commit-message trailer (Co-Authored-By), never as author or committer.
+# https://code.claude.com/docs/en/settings (commit attribution)
+AGENT_TRAILER_EMAILS = {"noreply@" + "anthropic.com"}
 EXAMPLE_DOMAINS = {"example.com", "example.org", "example.net"}
 GENERIC_USERS = {b"runner", b"runneradmin", b"agent", b"user", b"username", b"example", b"public"}
 PLACEHOLDERS = {b"placeholder", b"redacted", b"example", b"changeme", b"<redacted>"}
@@ -75,9 +79,18 @@ def issues_in_text(data, public_license_contacts=frozenset(), binary_literal=Fal
 
 def issues_in_message(data):
     issues = issues_in_text(data)
+    agent_lines = set()
     for match in IDENTITY_TRAILER.finditer(data):
-        if not public_identity(match.group(1).decode("utf-8", "replace")):
-            issues.append((data[:match.start()].count(b"\n") + 1, "non-github-trailer-identity"))
+        line = data[:match.start()].count(b"\n") + 1
+        email = match.group(1).decode("utf-8", "replace").lower()
+        if email in AGENT_TRAILER_EMAILS:
+            agent_lines.add(line)
+        elif not public_identity(email):
+            issues.append((line, "non-github-trailer-identity"))
+    # The agent address is allowed on its own trailer line only.
+    issues = [(line, rule) for line, rule in issues
+              if not (rule == "private-email" and line in agent_lines and
+                      len(EMAIL.findall(data.split(b"\n")[line - 1])) == 1)]
     return sorted(set(issues))
 
 

@@ -82,6 +82,12 @@ class ContentTests(unittest.TestCase):
     def test_coauthor_must_use_github_even_for_example_email(self):
         self.assertIn((1, "non-github-trailer-identity"), check.issues_in_message(b"Co-authored-by: Example <person@example.com>"))
 
+    def test_agent_coauthor_trailer_is_allowed_only_as_a_trailer(self):
+        agent = b"noreply@" + b"anthropic.com"
+        self.assertEqual([], check.issues_in_message(b"Fix\n\nCo-Authored-By: Claude <" + agent + b">\n"))
+        self.assertIn((1, "private-email"), check.issues_in_message(b"Contact " + agent))
+        self.assertIn((1, "private-email"), check.issues_in_message(b"Co-Authored-By: A <" + agent + b"> person@" + b"mail.test"))
+
     def test_sensitive_filename_is_redacted(self):
         path = "person@" + "mail.test.txt"
         self.assertIn("filename:private-email", self.rules(path, b"safe"))

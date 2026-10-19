@@ -3,7 +3,7 @@
 本仓库公开。以下要求适用于每一次提交、推送和 Release 发布。
 
 - 提交前必须审查完整暂存内容及提交说明，清除凭据、个人邮箱、个人姓名、个人目录、真实照片、定位信息和未经脱敏的日志、截图、数据库、调试文件。
-- 作者、提交者和共同作者使用 GitHub `users.noreply.github.com` 邮箱；显示名称使用 GitHub 用户名。GitHub 自身生成的提交允许官方 `noreply@github.com` 和 `web-flow@github.com` 身份。
+- 作者、提交者和共同作者使用 GitHub `users.noreply.github.com` 邮箱；显示名称使用 GitHub 用户名。GitHub 自身生成的提交允许官方 `noreply@github.com` 和 `web-flow@github.com` 身份。Claude 编程助手的官方无回复地址只允许作为提交说明中的 `Co-Authored-By` 尾注，不能作为作者或提交者。
 - 不得绕过 `.githooks`、跳过公开仓库检查或用过滤输出掩盖失败。自动检查通过后仍须人工检查照片、截图、姓名、上下文及检测器不支持的格式。
 - 每次提交前执行 `python3 tools/check_public_repo.py --staged --identities`；安装本地检查：`git config --local core.hooksPath .githooks`。提交说明由 `commit-msg` 再检查。
 - 推送前检查待推送的每个提交。发布前另行检查全部产物、压缩包、日志及调试信息，不能仅以源码检查代替产物脱敏。

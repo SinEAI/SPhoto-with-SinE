@@ -160,7 +160,12 @@ internal sealed class LibraryModel
     {
         try
         {
-            var from = SPhoto.Library.Fingerprint.Compute(original);
+            // The index's identity, which differs from the sampled one when
+            // another photo shares the sampled fingerprint.
+            var known = index.Known(original);
+            var info = new FileInfo(original);
+            var from = known?.Fingerprint is { } fp && known.Matches(info.Length, info.LastWriteTimeUtc.Ticks)
+                ? fp : SPhoto.Library.Fingerprint.Compute(original);
             var to = SPhoto.Library.Fingerprint.Compute(saved);
             index.AddVersion(from, to);
         }

@@ -339,7 +339,7 @@ public class IndexTests
         {
             raw.Open();
             using var cmd = raw.CreateCommand();
-            cmd.CommandText = "ALTER TABLE page_tags DROP COLUMN size; DROP INDEX files_legacy_fingerprint; ALTER TABLE files DROP COLUMN legacy_fingerprint; DROP TABLE legacy_fingerprints; PRAGMA user_version = 2;";
+            cmd.CommandText = "ALTER TABLE page_tags DROP COLUMN size; PRAGMA user_version = 2;";
             cmd.ExecuteNonQuery();
         }
         using (var index = LibraryIndex.Open(db))

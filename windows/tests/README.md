@@ -1,7 +1,7 @@
 # Windows runtime diagnostics
 
 The `runtime-tests` job in `windows-release.yml` runs the exact portable build
-produced for the working-branch commit. It verifies the source commit and asset
+produced for each commit pushed to main. It verifies the source commit and asset
 checksums before executing the program. These checks do not publish a Release.
 
 - `--runtime-test REPORT.json` measures the production scanner, fingerprinter,

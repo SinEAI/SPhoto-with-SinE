@@ -19,7 +19,7 @@ python3 -m unittest discover -s tools -p 'test_*.py'
 
 GitHub Actions 中的 `Public repository checks` 对所有提交历史运行相同检查。该工作流需要先提交到远端才能运行；主分支的强制保护需要在 GitHub 仓库设置中把此检查设为 required check。本地 hooks 与普通 CI 不能阻止有权限的人绕过规则直接提交到 GitHub。
 
-检查器拦截常见凭据、非公开邮箱、带用户名的绝对路径、包含凭据的 URL、常见敏感运行文件与图片元数据，也检查 ZIP/JAR 中的内容。输出不包含匹配值。历史扫描包含提交说明和 author/committer 身份，GitHub 官方生成的历史身份仅允许 `noreply@github.com` 与 `web-flow@github.com`。
+检查器拦截常见凭据、非公开邮箱、带用户名的绝对路径、包含凭据的 URL、常见敏感运行文件与图片元数据，也检查 ZIP/JAR 中的内容。输出不包含匹配值。历史扫描包含提交说明和 author/committer 身份，GitHub 官方生成的历史身份仅允许 `noreply@github.com` 与 `web-flow@github.com`。Claude 编程助手的官方无回复地址仅在单独一行的 `Co-Authored-By` 尾注中放行，作者和提交者仍必须是 GitHub noreply 邮箱。
 
 检测器基于规则，不是内容脱敏的证明。提交前必须人工复核姓名、手机号、身份证号、真实照片、截图、地址和位置等上下文。发布产物必须另行检查；特别是 PDB、崩溃日志、图库数据库、用户配置、安装包中的嵌入文件和编译路径。第三方许可证署名保留，任何检测例外都必须精确到真实误报，不能排除整个第三方目录。
 

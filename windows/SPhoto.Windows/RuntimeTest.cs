@@ -113,8 +113,9 @@ internal static class RuntimeTest
         bool pixelsDiffer = !pa.Data.AsSpan().SequenceEqual(pb.Data);
         bool bytesDiffer = !SHA256.HashData(first).AsSpan().SequenceEqual(SHA256.HashData(second));
         using var index = LibraryIndex.Open(Path.Combine(root, "identity.db"));
-        var files = new[] { a, b }.Select(p => Scanner.ReadFile(new FileInfo(p)) with { Fingerprint = Fingerprint.Compute(p) }).ToArray();
-        index.UpsertMany(files);
+        index.UpsertMany(new[] { a, b }.Select(p => Scanner.ReadFile(new FileInfo(p))));
+        Fingerprinter.Run(index);
+        var files = new[] { a, b }.Select(p => index.Known(p)!).ToArray();
         int distinct = index.Catalog().Items(CatalogScope.All).Count;
         Checks.Add(new("identity_fixture_has_different_decodable_pixels", pixelsDiffer && bytesDiffer, new { pixels_differ = pixelsDiffer, bytes_differ = bytesDiffer }));
         Checks.Add(new("different_photos_are_not_merged", distinct == 2, new { expected = 2, actual = distinct, fingerprints_equal = files[0].Fingerprint == files[1].Fingerprint }));
