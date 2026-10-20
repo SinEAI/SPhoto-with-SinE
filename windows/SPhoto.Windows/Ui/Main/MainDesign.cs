@@ -78,7 +78,7 @@ internal sealed class MainDesign : DesignShell
     private readonly MenuFlyout _moreMenu = new() { Placement = FlyoutPlacementMode.BottomEdgeAlignedRight };
     private readonly PhotoGrid _grid = new(176, 176, openOnClick: true);
     private readonly ScrollViewer _cardsScroll = new() { Padding = new Thickness(Inset - 4, 0, Inset, 32) };
-    private readonly VariableSizedWrapGrid _cards = new() { Orientation = Orientation.Horizontal, ItemWidth = 232, ItemHeight = 228 };
+    private readonly CardWall _cards = new();
     private readonly ContentPresenter _empty = new() { Visibility = Visibility.Collapsed };
     private readonly TextBlock _selectCount = Kit.Text("", 14, secondary: true);
     private readonly Button _addTag, _stack, _untag, _batchFilter, _print, _batchDelete, _pickDone;
@@ -99,6 +99,11 @@ internal sealed class MainDesign : DesignShell
     private long? _tagFrom;
     /// Pages showing all their photos rather than one card per tag.
     private readonly HashSet<long> _pagesShowingAll = new();
+    /// Which photos the cards pick, and which component Auto becomes: new
+    /// each time a page is opened (or 换一批), kept while the library
+    /// reloads under it so the cards do not change while being looked at.
+    private int _cardSeed = Random.Shared.Next();
+    private string? _cardsSignature;
     private List<PhotoEntry> _entries = new();
     private LibraryModel? _model;
     private CancellationTokenSource? _scan;
@@ -616,6 +621,7 @@ internal sealed class MainDesign : DesignShell
             _folder = tag[7..];
         }
         else _page = Page.All;
+        _cardSeed = Random.Shared.Next();
         // A tag opened from a page keeps the page lit in the sidebar.
         var item = Find(_tagFrom is { } p ? "page:" + p : tag);
         if (!ReferenceEquals(_nav.SelectedItem, item))
@@ -702,6 +708,9 @@ internal sealed class MainDesign : DesignShell
         if (cards) BuildTagCards(_page == Page.Tags ? null : CurrentUserPage?.Tags);
         else
         {
+            // Hidden cards would keep their slideshows running.
+            _cards.Clear();
+            _cardsSignature = null;
             var photos = PagePhotos();
             if (_page == Page.Folder) _grid.SetPhotos(photos, SubfolderOf, force);
             else _grid.SetPhotos(photos, LibraryActions.Month, force, _model is { } m ? m.Badge : null);
@@ -852,6 +861,7 @@ internal sealed class MainDesign : DesignShell
                 Add("从 SPhoto 中移除…", async () => await RemoveFolderAsync());
                 break;
         }
+        if (ShowsTagCards && _cards.Children.Count > 0) Add("换一批照片", Shuffle);
         if (_moreMenu.Items.Count > 0) _moreMenu.Items.Add(new MenuFlyoutSeparator());
         var refresh = new MenuFlyoutItem { Text = "刷新" };
         refresh.KeyboardAcceleratorTextOverride = "F5";
@@ -859,42 +869,73 @@ internal sealed class MainDesign : DesignShell
         _moreMenu.Items.Add(refresh);
     }
 
-    /// One card per tag, its cover a collage of its newest photos. On a
-    /// page each card is small, medium (two cells wide) or large (two by two).
+    /// <summary>
+    /// One card per tag, each showing a few of its photos picked at random
+    /// in one of the standard components (CardStyles). On a page each card
+    /// has the size and component chosen for it there; 标签 shows small
+    /// cards in random components. The cards stay as they are while the
+    /// library reloads; they change when the page is opened again, on
+    /// 换一批照片, or when a tag, size or component changes.
+    /// </summary>
     private void BuildTagCards(IReadOnlyList<string>? only)
     {
-        _cards.Children.Clear();
-        if (_model is null) return;
+        if (_model is null)
+        {
+            _cards.Clear();
+            _cardsSignature = null;
+            return;
+        }
         var page = CurrentUserPage;
         var tags = only ?? _model.Tags.Select(t => t.Name).ToList();
+        var signature = $"{_cardSeed}|{page?.Id}|" + string.Join("\u0001",
+            tags.Select(t => $"{t}:{_model.CountOf(t)}:{page?.SizeOf(t)}:{page?.StyleOf(t)}"));
+        if (signature == _cardsSignature) return;
+        _cardsSignature = signature;
+        _cards.Clear();
+        var previous = CardStyle.Auto;
         foreach (var name in tags)
         {
             var count = _model.CountOf(name);
             var tag = name;
             var size = page?.SizeOf(tag) ?? CardSize.Small;
-            int columns = size == CardSize.Small ? 1 : 2, rows = size == CardSize.Large ? 2 : 1;
-            // A cell's cover is 24 narrower and 72 shorter than the cell (padding, margin, name and count).
-            double width = columns * _cards.ItemWidth - 24, height = rows * _cards.ItemHeight - 72;
-            var card = Card(name, count == 0 ? "还没有照片" : $"{count} 张", new TagCollage(name, _model.CoverPhotos(name, 4), width, height),
+            var chosen = page?.StyleOf(tag) ?? CardStyle.Auto;
+            var random = new Random(HashCode.Combine(_cardSeed, StringComparer.Ordinal.GetHashCode(tag)));
+            // 标签 can list many tags; a wall of slideshows there would never sit still.
+            var style = chosen == CardStyle.Auto ? CardStyles.Pick(size, count, previous, random, motion: page is not null) : chosen;
+            previous = style;
+            var photos = CardStyles.Sample(_model.TagPhotos(tag), CardStyles.Wants(style, size), random);
+            var card = Card(name, count == 0 ? "还没有照片" : $"{count} 张", CardStyles.Create(style, size, photos, random),
                             () => Go("tag:" + tag));
-            VariableSizedWrapGrid.SetColumnSpan(card, columns);
-            VariableSizedWrapGrid.SetRowSpan(card, rows);
-            card.ContextFlyout = TagMenu(tag, page, size);
-            _cards.Children.Add(card);
+            card.ContextFlyout = TagMenu(tag, page, size, chosen);
+            _cards.Add(card, size);
         }
     }
 
-    private MenuFlyout TagMenu(string tag, PageInfo? page = null, CardSize size = CardSize.Small)
+    /// New photos and components on every card.
+    private void Shuffle()
+    {
+        _cardSeed = Random.Shared.Next();
+        ShowPage(force: true);
+    }
+
+    private MenuFlyout TagMenu(string tag, PageInfo? page = null, CardSize size = CardSize.Small, CardStyle style = CardStyle.Auto)
     {
         var menu = new MenuFlyout();
         if (page is not null)
         {
-            // Sizes right in the menu, no submenu.
-            foreach (var (choice, text) in new[] { (CardSize.Small, "小卡片"), (CardSize.Medium, "中卡片"), (CardSize.Large, "大卡片") })
+            // Sizes and components right in the menu, no submenus.
+            var id = page.Id;
+            foreach (var (choice, text) in new[] { (CardSize.Small, "小卡片"), (CardSize.Medium, "中卡片"), (CardSize.Large, "大卡片"), (CardSize.ExtraLarge, "超大卡片") })
             {
                 var item = new RadioMenuFlyoutItem { Text = text, GroupName = "size", IsChecked = choice == size };
-                var id = page.Id;
                 item.Click += async (_, _) => await SetCardSizeAsync(id, tag, choice);
+                menu.Items.Add(item);
+            }
+            menu.Items.Add(new MenuFlyoutSeparator());
+            foreach (var (choice, text) in CardStyles.All)
+            {
+                var item = new RadioMenuFlyoutItem { Text = text, GroupName = "style", IsChecked = choice == style };
+                item.Click += async (_, _) => await SetCardStyleAsync(id, tag, choice);
                 menu.Items.Add(item);
             }
             menu.Items.Add(new MenuFlyoutSeparator());
@@ -908,23 +949,27 @@ internal sealed class MainDesign : DesignShell
         return menu;
     }
 
+    /// A card: its cover filling the cells it takes, the name and count under it.
     private static Button Card(string title, string count, UIElement cover, Action click)
     {
-        var stack = new StackPanel { Spacing = 2 };
-        stack.Children.Add(cover);
+        var layout = Kit.Rows(Kit.Star(), Kit.Auto);
+        layout.Children.Add(cover);
+        var labels = new StackPanel { Spacing = 2 };
         var name = Kit.Strong(title, 15);
-        name.Margin = new Thickness(0, 10, 0, 0);
+        name.Margin = new Thickness(0, 8, 0, 0);
         name.TextTrimming = TextTrimming.CharacterEllipsis;
         name.TextWrapping = TextWrapping.NoWrap;
-        stack.Children.Add(name);
-        stack.Children.Add(Kit.Text(count, 13, secondary: true));
+        labels.Children.Add(name);
+        labels.Children.Add(Kit.Text(count, 13, secondary: true));
+        layout.Children.Add(Kit.At(labels, row: 1));
         var card = Kit.Flat(new Button
         {
-            Content = stack,
+            Content = layout,
             Padding = new Thickness(4),
-            Margin = new Thickness(0, 0, 12, 12),
-            VerticalAlignment = VerticalAlignment.Top,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
         });
         card.Click += (_, _) => click();
         return card;
@@ -934,6 +979,13 @@ internal sealed class MainDesign : DesignShell
     {
         if (_model is null) return;
         _model.Index.SetPageTagSize(page, tag, size);
+        await ReloadModelAsync();
+    }
+
+    private async Task SetCardStyleAsync(long page, string tag, CardStyle style)
+    {
+        if (_model is null) return;
+        _model.Index.SetPageTagStyle(page, tag, style);
         await ReloadModelAsync();
     }
 
@@ -1222,7 +1274,8 @@ internal sealed class MainDesign : DesignShell
                 await session.LoadAsync();
                 session.Apply(session.State.WithFilter(filter, 1f));
                 var saved = await session.SaveCopyAsync();
-                await Task.Run(() => LibraryModel.RecordVersion(App.Library.Index, p.Path, saved));
+                var name = Filter.All.FirstOrDefault(f => f.Id == filter)?.Title;
+                await Task.Run(() => LibraryModel.RecordVersion(App.Library.Index, p.Path, saved, name));
                 done++;
             }
             catch (Exception)
@@ -1263,12 +1316,13 @@ internal sealed class MainDesign : DesignShell
         _grid.View.Focus(FocusState.Programmatic);
     }
 
-    /// The editor closed; saved is the version it wrote, if any.
-    internal async Task EditorClosedAsync(string original, string? saved)
+    /// The editor closed; saved is the version it wrote, if any, and name
+    /// what to call it at first.
+    internal async Task EditorClosedAsync(string original, string? saved, string? name = null)
     {
         await _viewer.EndEditAsync(saved);
         if (saved is null) return;
-        await Task.Run(() => LibraryModel.RecordVersion(App.Library.Index, original, saved));
+        await Task.Run(() => LibraryModel.RecordVersion(App.Library.Index, original, saved, name));
         await RefreshAsync();
     }
 
@@ -1289,7 +1343,14 @@ internal sealed class MainDesign : DesignShell
     internal int CardCount => _cards.Children.Count;
     internal bool CardsShown => _cardsScroll.Visibility == Visibility.Visible;
     internal Task SetCardSizeForTest(long page, string tag, CardSize size) => SetCardSizeAsync(page, tag, size);
-    internal int FirstCardColumnsForTest => _cards.Children.Count > 0 ? VariableSizedWrapGrid.GetColumnSpan((FrameworkElement)_cards.Children[0]) : 0;
+    internal int FirstCardColumnsForTest => _cards.Children.Count > 0 ? _cards.SpanOf(_cards.Children[0]).Columns : 0;
+    internal Task SetCardStyleForTest(long page, string tag, CardStyle style) => SetCardStyleAsync(page, tag, style);
+    /// The component the first card shows (Auto resolved).
+    internal CardStyle? FirstCardStyleForTest =>
+        _cards.Children.Count > 0 && _cards.Children[0] is Button { Content: Grid { Children.Count: > 0 } layout } && layout.Children[0] is CardCover cover
+            ? cover.Component : null;
+    internal void ShuffleForTest() => Shuffle();
+    internal CardWall CardsForTest => _cards;
     /// Selecting shows its actions in the header and hides 选择 there.
     internal bool SelectionActionsInHeader => _selectCount.Visibility == Visibility.Visible && _select.Visibility == Visibility.Collapsed;
     internal void SelectForTest(bool on) => SetSelecting(on);

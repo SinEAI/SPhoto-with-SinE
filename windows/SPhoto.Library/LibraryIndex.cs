@@ -19,7 +19,7 @@ namespace SPhoto.Library;
 public sealed class LibraryIndex : IDisposable
 {
     /// Bumped with every schema change; Migrate brings older files forward.
-    public const int SchemaVersion = 3;
+    public const int SchemaVersion = 4;
 
     private readonly object _gate = new();
     private SqliteConnection? _db;
@@ -150,7 +150,19 @@ public sealed class LibraryIndex : IDisposable
                     """);
             });
         }
-        // Later versions: if (version < 4) { ALTER ...; PRAGMA user_version = 4; }
+        if (version < 4)
+        {
+            // Versions can be named, and each tag's card on a page has a style.
+            InTransaction(() =>
+            {
+                Exec("""
+                    ALTER TABLE versions ADD COLUMN name TEXT NULL;
+                    ALTER TABLE page_tags ADD COLUMN style INTEGER NOT NULL DEFAULT 0;
+                    PRAGMA user_version = 4;
+                    """);
+            });
+        }
+        // Later versions: if (version < 5) { ALTER ...; PRAGMA user_version = 5; }
     }
 
     public void Dispose()
@@ -579,6 +591,16 @@ public sealed class LibraryIndex : IDisposable
         }
     }
 
+    /// Which component shows the tag's card on this page.
+    public void SetPageTagStyle(long id, string tag, CardStyle style)
+    {
+        lock (_gate)
+        {
+            Exec("UPDATE page_tags SET style = $style WHERE page_id = $id AND tag = $tag",
+                 ("$style", (int)style), ("$id", id), ("$tag", tag));
+        }
+    }
+
     /// Archived pages leave the main list but keep their tags.
     public void ArchivePage(long id, bool archived)
     {
@@ -605,7 +627,8 @@ public sealed class LibraryIndex : IDisposable
         {
             var tags = new Dictionary<long, List<string>>();
             var sizes = new Dictionary<long, Dictionary<string, CardSize>>();
-            using (var cmd = Command("SELECT page_id, tag, size FROM page_tags ORDER BY page_id, sort"))
+            var styles = new Dictionary<long, Dictionary<string, CardStyle>>();
+            using (var cmd = Command("SELECT page_id, tag, size, style FROM page_tags ORDER BY page_id, sort"))
             using (var r = cmd.ExecuteReader())
             {
                 while (r.Read())
@@ -613,10 +636,19 @@ public sealed class LibraryIndex : IDisposable
                     long id = r.GetInt64(0);
                     if (!tags.TryGetValue(id, out var list)) tags[id] = list = new List<string>();
                     list.Add(r.GetString(1));
-                    var size = (CardSize)Math.Clamp(r.GetInt64(2), 0, 2);
-                    if (size == CardSize.Small) continue;
-                    if (!sizes.TryGetValue(id, out var bySize)) sizes[id] = bySize = new Dictionary<string, CardSize>(StringComparer.Ordinal);
-                    bySize[r.GetString(1)] = size;
+                    var size = (CardSize)Math.Clamp(r.GetInt64(2), 0, (int)CardSize.ExtraLarge);
+                    if (size != CardSize.Small)
+                    {
+                        if (!sizes.TryGetValue(id, out var bySize)) sizes[id] = bySize = new Dictionary<string, CardSize>(StringComparer.Ordinal);
+                        bySize[r.GetString(1)] = size;
+                    }
+                    // A style from a newer SPhoto falls back to Auto.
+                    long style = r.GetInt64(3);
+                    if (style > 0 && style <= (int)CardStyle.Slideshow)
+                    {
+                        if (!styles.TryGetValue(id, out var byStyle)) styles[id] = byStyle = new Dictionary<string, CardStyle>(StringComparer.Ordinal);
+                        byStyle[r.GetString(1)] = (CardStyle)style;
+                    }
                 }
             }
             using (var cmd = Command("SELECT id, name, archived FROM pages ORDER BY sort, id"))
@@ -627,28 +659,29 @@ public sealed class LibraryIndex : IDisposable
                 {
                     long id = r.GetInt64(0);
                     pages.Add(new PageInfo(id, r.GetString(1), tags.TryGetValue(id, out var t) ? t : new List<string>(), r.GetInt64(2) != 0,
-                                           sizes.TryGetValue(id, out var z) ? z : null));
+                                           sizes.TryGetValue(id, out var z) ? z : null, styles.TryGetValue(id, out var y) ? y : null));
                 }
                 return pages;
             }
         }
     }
 
-    /// Tags that stay on the page keep their card size.
+    /// Tags that stay on the page keep their card's size and style.
     private void WritePageTags(long id, IEnumerable<string> tags)
     {
-        var sizes = new Dictionary<string, long>(StringComparer.Ordinal);
-        using (var cmd = Command("SELECT tag, size FROM page_tags WHERE page_id = $id", ("$id", id)))
+        var cards = new Dictionary<string, (long Size, long Style)>(StringComparer.Ordinal);
+        using (var cmd = Command("SELECT tag, size, style FROM page_tags WHERE page_id = $id", ("$id", id)))
         using (var r = cmd.ExecuteReader())
         {
-            while (r.Read()) sizes[r.GetString(0)] = r.GetInt64(1);
+            while (r.Read()) cards[r.GetString(0)] = (r.GetInt64(1), r.GetInt64(2));
         }
         Exec("DELETE FROM page_tags WHERE page_id = $id", ("$id", id));
         int sort = 0;
         foreach (var tag in tags.Select(t => t.Trim().TrimStart('#').Trim()).Where(t => t.Length > 0).Distinct(StringComparer.Ordinal))
         {
-            Exec("INSERT INTO page_tags(page_id, tag, sort, size) VALUES($id, $tag, $sort, $size)",
-                 ("$id", id), ("$tag", tag), ("$sort", sort++), ("$size", sizes.TryGetValue(tag, out var size) ? size : 0));
+            var card = cards.GetValueOrDefault(tag);
+            Exec("INSERT INTO page_tags(page_id, tag, sort, size, style) VALUES($id, $tag, $sort, $size, $style)",
+                 ("$id", id), ("$tag", tag), ("$sort", sort++), ("$size", card.Size), ("$style", card.Style));
         }
     }
 
@@ -759,18 +792,59 @@ public sealed class LibraryIndex : IDisposable
 
     // ----- Versions -----
 
-    /// Records that versionFp is an edited version of originalFp; beats name matching.
-    public void AddVersion(string originalFingerprint, string versionFingerprint)
+    /// <summary>
+    /// Records that versionFp is an edited version of originalFp; beats name
+    /// matching. name, when given, is what the version is called; recording
+    /// the same version again without one keeps the name it has.
+    /// </summary>
+    public void AddVersion(string originalFingerprint, string versionFingerprint, string? name = null)
     {
         if (originalFingerprint == versionFingerprint) return;
+        name = CleanVersionName(name);
         lock (_gate)
         {
             Exec("""
-                INSERT INTO versions(version_fingerprint, original_fingerprint, created) VALUES($v, $o, $now)
-                ON CONFLICT(version_fingerprint) DO UPDATE SET original_fingerprint = excluded.original_fingerprint
-                """, ("$v", versionFingerprint), ("$o", originalFingerprint), ("$now", Now));
+                INSERT INTO versions(version_fingerprint, original_fingerprint, created, name) VALUES($v, $o, $now, $name)
+                ON CONFLICT(version_fingerprint) DO UPDATE SET original_fingerprint = excluded.original_fingerprint,
+                  name = COALESCE(excluded.name, versions.name)
+                """, ("$v", versionFingerprint), ("$o", originalFingerprint), ("$now", Now), ("$name", name));
         }
     }
+
+    /// <summary>
+    /// Names a version of originalFp, or clears its name (null or blank).
+    /// A version known only by its file name gets a record, so the name has
+    /// somewhere to live. The file itself is not renamed.
+    /// </summary>
+    public void SetVersionName(string originalFingerprint, string versionFingerprint, string? name)
+    {
+        if (originalFingerprint == versionFingerprint) return;
+        name = CleanVersionName(name);
+        lock (_gate)
+        {
+            Exec("""
+                INSERT INTO versions(version_fingerprint, original_fingerprint, created, name) VALUES($v, $o, $now, $name)
+                ON CONFLICT(version_fingerprint) DO UPDATE SET name = excluded.name
+                """, ("$v", versionFingerprint), ("$o", originalFingerprint), ("$now", Now), ("$name", name));
+        }
+    }
+
+    /// The names given to the recorded versions of a photo.
+    public IReadOnlyList<string> VersionNamesOf(string originalFingerprint)
+    {
+        lock (_gate)
+        {
+            using var cmd = Command("SELECT name FROM versions WHERE original_fingerprint = $o AND name IS NOT NULL",
+                                    ("$o", originalFingerprint));
+            using var r = cmd.ExecuteReader();
+            var names = new List<string>();
+            while (r.Read()) names.Add(r.GetString(0));
+            return names;
+        }
+    }
+
+    private static string? CleanVersionName(string? name) =>
+        name?.Trim() is { Length: > 0 } clean ? clean : null;
 
     // ----- Catalog -----
 
@@ -794,10 +868,14 @@ public sealed class LibraryIndex : IDisposable
                 while (r.Read()) data.Analysis[r.GetString(0)] = ReadAnalysis(r, 1);
             }
             data.Overrides = ReadOverrides();
-            using (var cmd = Command("SELECT version_fingerprint, original_fingerprint FROM versions"))
+            using (var cmd = Command("SELECT version_fingerprint, original_fingerprint, name FROM versions"))
             using (var r = cmd.ExecuteReader())
             {
-                while (r.Read()) data.Versions[r.GetString(0)] = r.GetString(1);
+                while (r.Read())
+                {
+                    data.Versions[r.GetString(0)] = r.GetString(1);
+                    if (!r.IsDBNull(2)) data.VersionNames[r.GetString(0)] = r.GetString(2);
+                }
             }
             using (var cmd = Command("SELECT name, fingerprint FROM tags"))
             using (var r = cmd.ExecuteReader())

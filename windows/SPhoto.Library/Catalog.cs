@@ -51,6 +51,7 @@ internal sealed class CatalogData
     internal Dictionary<string, AnalysisInfo> Analysis { get; } = new(StringComparer.Ordinal);
     internal StackOverrides Overrides { get; set; } = StackOverrides.None;
     internal Dictionary<string, string> Versions { get; } = new(StringComparer.Ordinal);
+    internal Dictionary<string, string> VersionNames { get; } = new(StringComparer.Ordinal);
     internal List<(string Name, string Fingerprint)> Tags { get; } = new();
 }
 
@@ -69,6 +70,7 @@ public sealed class Catalog
     private readonly Dictionary<string, CatalogItem> _itemOf;
     private readonly Dictionary<string, string> _originalOf;
     private readonly Dictionary<string, List<CatalogPhoto>> _versions;
+    private readonly Dictionary<string, string> _versionNames;
     private readonly Dictionary<string, StackInput> _inputs;
     private readonly StackOverrides _overrides;
     private readonly Dictionary<string, HashSet<string>> _tags;
@@ -76,6 +78,7 @@ public sealed class Catalog
     internal Catalog(CatalogData data)
     {
         _overrides = data.Overrides;
+        _versionNames = data.VersionNames;
 
         // Copies of the same photo.
         var byKey = new Dictionary<string, List<FileRecord>>(data.Files.Count, StringComparer.Ordinal);
@@ -238,6 +241,9 @@ public sealed class Catalog
     /// The edited versions of any photo (not only covers), newest first.
     public IReadOnlyList<CatalogPhoto> VersionsOf(string fingerprint) =>
         _versions.TryGetValue(fingerprint, out var list) ? list : Array.Empty<CatalogPhoto>();
+
+    /// The name the user gave a version, or null (it is then shown as "版本 N").
+    public string? VersionName(string fingerprint) => _versionNames.GetValueOrDefault(fingerprint);
 
     private CatalogItem MakeItem(CatalogPhoto cover, IEnumerable<CatalogPhoto> members)
     {

@@ -75,6 +75,20 @@ internal sealed class EditState : IEquatable<EditState>
 
     internal bool IsOriginal => Equals(Original);
 
+    /// <summary>
+    /// What a version saved with this state is called at first: its
+    /// filter, or 裁剪 / 旋转 when only the framing changed; null leaves
+    /// it "版本 N". The user can rename it in the viewer.
+    /// </summary>
+    internal string? SuggestedName()
+    {
+        if (Filter.Length > 0) return Editing.Filter.All.FirstOrDefault(f => f.Id == Filter)?.Title;
+        bool toned = Values.Any(v => v != 0) || Curves.Any(c => c.Length > 0) ||
+                        Hue.Any(v => v != 0) || Saturation.Any(v => v != 0) || Luminance.Any(v => v != 0);
+        if (toned || Geometry.Equals(Original.Geometry)) return null;
+        return CropMath.Rect(Geometry) != (0, 0, 1, 1) ? "裁剪" : "旋转";
+    }
+
     private EditState Copy(float[]? values = null, string? filter = null, float? strength = null, Geometry? geometry = null,
                            (float X, float Y)[][]? curves = null, float[]? hue = null, float[]? saturation = null,
                            float[]? luminance = null) => new()

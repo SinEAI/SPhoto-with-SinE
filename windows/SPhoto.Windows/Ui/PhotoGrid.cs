@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -10,6 +11,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using SPhoto.Library;
 using SPhoto.Services;
 using SPhoto.Views;
 using Windows.System;
@@ -17,10 +19,11 @@ using Windows.System;
 namespace SPhoto.Ui;
 
 /// <summary>What a tile shows over its photo: a stack of similar shots
-/// (offset cards behind and a count) or edited versions (a corner pill).
-/// The two look different on purpose: a stack is several photos, versions
-/// are one photo edited.</summary>
-internal readonly record struct TileBadge(int Stack, int Versions);
+/// (two of its other shots peeking out behind, slightly turned, and a
+/// count) or edited versions (a corner pill). The two look different on
+/// purpose: a stack is several photos, versions are one photo edited.
+/// Behind: the shots shown behind the cover, at most two.</summary>
+internal readonly record struct TileBadge(int Stack, int Versions, IReadOnlyList<string>? Behind = null);
 
 /// <summary>
 /// A virtualised grid of photo thumbnails, optionally grouped, built in
@@ -36,23 +39,33 @@ internal sealed class PhotoGrid
     /// <param name="strip">One scrolling row (a filmstrip) instead of a grid.</param>
     /// <param name="openOnClick">A single click opens, as in the Windows 10
     /// Photos app; otherwise a click selects and a double click opens.</param>
+    /// <param name="tileWidth">In a grid, the smallest a tile gets: tiles
+    /// grow a little so that the columns fill the width, rather than
+    /// leaving a gap on the right until another column fits.</param>
     internal PhotoGrid(double tileWidth, double tileHeight, bool rounded = false,
                        ListViewSelectionMode selection = ListViewSelectionMode.Extended,
                        bool strip = false, bool openOnClick = false)
     {
         _openOnClick = openOnClick;
+        _tileWidth = tileWidth;
+        _tileHeight = tileHeight;
         View = strip ? new ListView() : new GridView();
         View.SelectionMode = openOnClick ? ListViewSelectionMode.None : selection;
         View.IsItemClickEnabled = openOnClick;
-        // Children: two cards behind (stacks), the photo, the stack count,
-        // the versions pill. Built once; containers are recycled.
+        // Children: two shots behind (stacks), the photo, the stack count,
+        // the versions pill. Built once; containers are recycled. In a grid
+        // the tile takes the size the panel gives it (see Fit).
         string corner = rounded ? "6" : "0";
+        string size = strip ? $" Width=\"{tileWidth}\" Height=\"{tileHeight}\"" : "";
+        string behind =
+            $"<Border BorderBrush=\"#26000000\" BorderThickness=\"1\" CornerRadius=\"{corner}\" Margin=\"{StackInset}\" " +
+            "RenderTransformOrigin=\"0.5,0.5\" Visibility=\"Collapsed\">" +
+            $"<Border Background=\"#FFE4E4E4\" BorderBrush=\"#FFFFFFFF\" BorderThickness=\"2\" CornerRadius=\"{corner}\">" +
+            "<Image Stretch=\"UniformToFill\" /></Border></Border>";
         View.ItemTemplate = (DataTemplate)XamlReader.Load(
             "<DataTemplate xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">" +
-            $"<Grid Width=\"{tileWidth}\" Height=\"{tileHeight}\">" +
-            $"<Border Background=\"#FFE4E4E4\" Margin=\"10,10,0,0\" CornerRadius=\"{corner}\" Visibility=\"Collapsed\" />" +
-            $"<Border Background=\"#FFCFCFCF\" BorderBrush=\"#FFFFFFFF\" BorderThickness=\"1\" Margin=\"5,5,5,5\" CornerRadius=\"{corner}\" Visibility=\"Collapsed\" />" +
-            $"<Grid Background=\"#FFEEEEEE\" CornerRadius=\"{corner}\"><Image Stretch=\"UniformToFill\" /></Grid>" +
+            $"<Grid{size}>" + behind + behind +
+            $"<Grid Background=\"#FFEEEEEE\" BorderBrush=\"#FFFFFFFF\" CornerRadius=\"{corner}\"><Image Stretch=\"UniformToFill\" /></Grid>" +
             "<Border HorizontalAlignment=\"Right\" VerticalAlignment=\"Bottom\" Margin=\"0,0,16,16\" Padding=\"8,2,8,3\" " +
             "CornerRadius=\"11\" Background=\"#B3000000\" Visibility=\"Collapsed\">" +
             "<TextBlock Foreground=\"White\" FontSize=\"12\" FontWeight=\"SemiBold\" /></Border>" +
@@ -62,7 +75,20 @@ internal sealed class PhotoGrid
             "<FontIcon Glyph=\"&#xE70F;\" FontSize=\"11\" VerticalAlignment=\"Center\" />" +
             "<TextBlock FontSize=\"12\" /></StackPanel></Border>" +
             "</Grid></DataTemplate>");
-        if (strip)
+        if (!strip)
+        {
+            // Tiles start at their smallest; Fit widens them to the window.
+            View.ItemsPanel = (ItemsPanelTemplate)XamlReader.Load(
+                "<ItemsPanelTemplate xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">" +
+                $"<ItemsWrapGrid Orientation=\"Horizontal\" ItemWidth=\"{tileWidth + TileGap}\" ItemHeight=\"{tileHeight + TileGap}\" />" +
+                "</ItemsPanelTemplate>");
+            View.ItemContainerStyle = (Style)XamlReader.Load(
+                "<Style xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" TargetType=\"GridViewItem\">" +
+                "<Setter Property=\"HorizontalContentAlignment\" Value=\"Stretch\" />" +
+                "<Setter Property=\"VerticalContentAlignment\" Value=\"Stretch\" /></Style>");
+            View.SizeChanged += (_, _) => Fit();
+        }
+        else
         {
             View.ItemsPanel = (ItemsPanelTemplate)XamlReader.Load(
                 "<ItemsPanelTemplate xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">" +
@@ -105,7 +131,47 @@ internal sealed class PhotoGrid
     }
 
     private readonly bool _openOnClick;
+    private readonly double _tileWidth, _tileHeight;
     private Func<PhotoEntry, TileBadge>? _badge;
+
+    /// How far a stack's cover sits inside its tile, room for the shots behind to show.
+    private const double StackInset = 6;
+
+    /// The right edge of each tile in a grid: GridViewItem's own margin.
+    private const double TileGap = 4;
+
+    /// <summary>
+    /// Sizes the grid's tiles so that whole columns fill the width: as many
+    /// columns of at least the tile width as fit, each widened to share
+    /// what is left. Snapped to whole device pixels, never wider than the
+    /// row, so a rounding error cannot push the last column to the next row.
+    /// </summary>
+    private void Fit()
+    {
+        if (View.ItemsPanelRoot is not ItemsWrapGrid panel) return;
+        double width = View.ActualWidth - View.Padding.Left - View.Padding.Right;
+        if (width <= 0) return;
+        double scale = View.XamlRoot?.RasterizationScale ?? 1;
+        // A slot is a tile and the gap on its right; the padding already
+        // leaves room for the last one's gap.
+        var (columns, slot) = CardLayout.Fit(width, _tileWidth + TileGap, 0, scale);
+        double height = Math.Round((slot - TileGap) * _tileHeight / _tileWidth * scale) / scale + TileGap;
+        if (Math.Abs(panel.ItemWidth - slot) > 0.01 || Math.Abs(panel.ItemHeight - height) > 0.01)
+        {
+            panel.ItemWidth = slot;
+            panel.ItemHeight = height;
+            Perf.Line("grid", $"fit {columns} columns of {slot:F1} in {width:F0}");
+        }
+    }
+
+    /// Columns the grid shows now and the room they leave on the right (for the UI test).
+    internal (int Columns, double Slack) FitForTest()
+    {
+        if (View.ItemsPanelRoot is not ItemsWrapGrid { ItemWidth: > 0 } panel) return (0, double.NaN);
+        double width = View.ActualWidth - View.Padding.Left - View.Padding.Right;
+        int columns = (int)Math.Floor(width / panel.ItemWidth);
+        return (columns, width - columns * panel.ItemWidth);
+    }
 
     /// Picking several photos (a "Select" command): clicks select instead
     /// of opening.
@@ -305,9 +371,28 @@ internal sealed class PhotoGrid
         var badge = _badge?.Invoke(entry) ?? default;
         bool stack = badge.Stack > 1;
         var shown = stack ? Visibility.Visible : Visibility.Collapsed;
-        root.Children[0].Visibility = shown;
-        root.Children[1].Visibility = shown;
-        ((FrameworkElement)root.Children[2]).Margin = stack ? new Thickness(0, 0, 10, 10) : new Thickness(0);
+        // The two shots behind turn a few degrees apart, each stack its own
+        // way (from its cover's name, so a tile looks the same every time).
+        int seed = StringComparer.OrdinalIgnoreCase.GetHashCode(entry.Path);
+        for (int i = 0; i < 2; i++)
+        {
+            var card = (Border)root.Children[i];
+            bool used = stack && (i == 0 || badge.Stack > 2);
+            card.Visibility = used ? Visibility.Visible : Visibility.Collapsed;
+            var image = (Image)((Border)card.Child).Child;
+            if (!used)
+            {
+                image.Source = null;
+                continue;
+            }
+            double turn = 2.2 + ((seed >> (i * 8)) & 0xFF) / 255.0 * 2.0;
+            card.RenderTransform = new RotateTransform { Angle = (i == 0) == (seed % 2 == 0) ? -turn : turn };
+            var path = badge.Behind is { } behind && behind.Count > 0 ? behind[Math.Min(i, behind.Count - 1)] : null;
+            _ = ShowBehindAsync(root, entry, image, path);
+        }
+        var cover = (Grid)root.Children[2];
+        cover.Margin = new Thickness(stack ? StackInset : 0);
+        cover.BorderThickness = new Thickness(stack ? 2 : 0);
         var count = (Border)root.Children[3];
         count.Visibility = shown;
         if (stack) ((TextBlock)count.Child).Text = badge.Stack.ToString();
@@ -315,6 +400,22 @@ internal sealed class PhotoGrid
         versions.Visibility = badge.Versions > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (badge.Versions > 0) ((TextBlock)((StackPanel)versions.Child).Children[1]).Text = $"{badge.Versions} 个版本";
         if (stack) ToolTipService.SetToolTip(count, $"{badge.Stack} 张相似照片叠在一起");
+    }
+
+    /// A stacked shot behind the cover: its thumbnail, if the tile still shows the same stack.
+    private static async Task ShowBehindAsync(Grid root, PhotoEntry entry, Image image, string? path)
+    {
+        if (path is null)
+        {
+            image.Source = null;
+            return;
+        }
+        if (image.Tag as string == path && image.Source is not null) return;
+        image.Tag = path;
+        image.Source = Thumbnails.Recent(path);
+        if (image.Source is not null) return;
+        var source = await Thumbnails.LoadAsync(path);
+        if (image.Tag as string == path && root.DataContext is PhotoItem { Entry: var shown } && shown == entry) image.Source = source;
     }
 
     /// Phase 0 shows the empty tile at once; the thumbnail is asked for in
@@ -398,6 +499,8 @@ internal sealed class PhotoGrid
     /// </summary>
     private void Heal()
     {
+        // A new list can bring a new panel, back at the smallest tiles.
+        if (View is GridView) Fit();
         foreach (var container in RealizedContainers())
         {
             if (container is not { Content: PhotoItem item, ContentTemplateRoot: Grid root } || !IsCurrent(item)) continue;

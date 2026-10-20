@@ -550,20 +550,21 @@ internal sealed class MainViewer : Grid
     private void UpdateShot()
     {
         var shot = Shot;
-        // Versions: 原图 and each saved edit, oldest first.
+        // Versions: 原图 and each saved edit, oldest first, by the names
+        // they were given ("版本 N" until then). Right click renames one.
         _versions.Children.Clear();
-        if (shot is { Versions.Count: > 0 })
+        if (shot is { Versions.Count: > 0 } && _owner.Model is { } model)
         {
-            var choices = new List<(string Label, PhotoEntry Entry)> { ("原图", shot.Cover) };
-            var oldestFirst = shot.Versions.Reverse().ToList();
-            for (int i = 0; i < oldestFirst.Count; i++) choices.Add(($"版本 {i + 1}", oldestFirst[i]));
-            foreach (var (label, entry) in choices)
+            var choices = new List<(string Label, PhotoEntry Entry, bool Version)> { ("原图", shot.Cover, false) };
+            foreach (var v in shot.Versions.Reverse()) choices.Add((model.VersionLabel(shot, v), v, true));
+            foreach (var (label, entry, version) in choices)
             {
-                var b = Kit.Flat(new ToggleButton { Content = label, Padding = new Thickness(10, 3, 10, 4), CornerRadius = new CornerRadius(12), FontSize = 13 });
+                var b = Kit.Flat(new ToggleButton { Content = label, Padding = new Thickness(10, 3, 10, 4), CornerRadius = new CornerRadius(12), FontSize = 13, MaxWidth = 180 });
                 b.IsChecked = string.Equals(entry.Path, _photo.Current?.Path, StringComparison.OrdinalIgnoreCase);
                 var target = entry;
                 b.Click += (_, _) => _photo.ReplaceCurrent(target);
-                ToolTipService.SetToolTip(b, entry.Name);
+                ToolTipService.SetToolTip(b, version ? $"{entry.Name}（右键可重命名）" : entry.Name);
+                if (version) b.ContextFlyout = VersionMenu(model, target, label);
                 _versions.Children.Add(b);
             }
         }
@@ -615,6 +616,65 @@ internal sealed class MainViewer : Grid
     }
 
     // ----- Stacks and versions -----
+
+    private MenuFlyout VersionMenu(LibraryModel model, PhotoEntry version, string label)
+    {
+        var menu = new MenuFlyout();
+        var rename = new MenuFlyoutItem { Text = "重命名…" };
+        rename.Click += async (_, _) => await RenameVersionAsync(version, label);
+        menu.Items.Add(rename);
+        if (model.HasVersionName(version))
+        {
+            var reset = new MenuFlyoutItem { Text = "恢复默认名称" };
+            reset.Click += async (_, _) => await SetVersionNameAsync(version, null);
+            menu.Items.Add(reset);
+        }
+        return menu;
+    }
+
+    private async Task RenameVersionAsync(PhotoEntry version, string label)
+    {
+        var box = new TextBox { PlaceholderText = "版本名称，比如“给妈妈的”", Text = label, MaxLength = 30 };
+        box.SelectAll();
+        var content = new StackPanel { Spacing = 10, MinWidth = 320 };
+        content.Children.Add(box);
+        content.Children.Add(Kit.Paragraph("名称只记在 SPhoto 里，文件名不变。", 12));
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "重命名版本",
+            Content = content,
+            PrimaryButtonText = "重命名",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        box.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = box.Text.Trim().Length > 0;
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        await SetVersionNameAsync(version, box.Text.Trim());
+    }
+
+    private async Task SetVersionNameAsync(PhotoEntry version, string? name)
+    {
+        if (_owner.Model is not { } model) return;
+        if (!model.RenameVersion(version, name))
+        {
+            await Dialogs.ShowAsync(XamlRoot, "暂时不能重命名", "SPhoto 还在整理这张照片，稍后再试。");
+            return;
+        }
+        await _owner.ReloadModelAsync();
+    }
+
+    /// Renames a version without the dialogs; false when it cannot be renamed yet.
+    internal async Task<bool> RenameVersionForTest(int oldestFirst, string? name)
+    {
+        if (Shot is not { } shot || oldestFirst >= shot.Versions.Count || _owner.Model is not { } model) return false;
+        if (!model.RenameVersion(shot.Versions.Reverse().ElementAt(oldestFirst), name)) return false;
+        await _owner.ReloadModelAsync();
+        return true;
+    }
+
+    internal string? VersionLabelForTest(int index) =>
+        index < _versions.Children.Count ? (_versions.Children[index] as ContentControl)?.Content as string : null;
 
     private async void SetCover()
     {

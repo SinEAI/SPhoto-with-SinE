@@ -320,6 +320,14 @@ public class VersionsTests
     public void OriginalStem(string name, string? stem) => Assert.Equal(stem, Versions.OriginalStem(name));
 
     [Fact]
+    public void NamesAreNumberedWhenTaken()
+    {
+        Assert.Equal("胶片", Versions.Numbered("胶片", new string?[] { null, "黑白" }));
+        Assert.Equal("胶片 2", Versions.Numbered("胶片", new string?[] { "胶片" }));
+        Assert.Equal("胶片 3", Versions.Numbered("胶片", new string?[] { "胶片", "胶片 2" }));
+    }
+
+    [Fact]
     public void MatchByNameInTheSameFolder()
     {
         string P(params string[] parts) => Path.Combine(parts);

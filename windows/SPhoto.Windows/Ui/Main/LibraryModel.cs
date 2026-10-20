@@ -117,9 +117,9 @@ internal sealed class LibraryModel
         }
     }
 
-    /// The newest few photos with a tag, for its cover.
-    internal IReadOnlyList<PhotoEntry> CoverPhotos(string tag, int count) =>
-        Shots(Scope.OfTag(tag)).Take(count).Select(s => s.Cover).ToList();
+    /// Every photo with a tag, one per tile, newest first: what its card picks from.
+    internal IReadOnlyList<PhotoEntry> TagPhotos(string tag) =>
+        Shots(Scope.OfTag(tag)).Select(s => s.Cover).ToList();
 
     /// The number of tiles with a tag.
     internal int CountOf(string tag) => Tags.FirstOrDefault(t => t.Name == tag)?.Count ?? 0;
@@ -143,8 +143,17 @@ internal sealed class LibraryModel
 
     internal TileBadge Badge(PhotoEntry cover) =>
         ShotOf(cover.Path) is { } s && string.Equals(s.Cover.Path, cover.Path, StringComparison.OrdinalIgnoreCase)
-            ? new TileBadge(s.Stack.Count, s.Versions.Count)
+            ? new TileBadge(s.Stack.Count, s.Versions.Count, BehindOf(s))
             : default;
+
+    /// The shots a stack tile shows behind its cover: the ones taken right after it, else before.
+    private static IReadOnlyList<string>? BehindOf(Shot s)
+    {
+        if (s.Stack.Count < 2) return null;
+        int at = s.Stack.ToList().FindIndex(p => string.Equals(p.Path, s.Cover.Path, StringComparison.OrdinalIgnoreCase));
+        return s.Stack.Skip(at + 1).Concat(s.Stack.Take(Math.Max(at, 0)).Reverse())
+            .Select(p => p.Path).Take(2).ToList();
+    }
 
     internal string? CoverPathOf(string key) =>
         _catalog.ByFingerprint.GetValueOrDefault(key)?.Path;
@@ -155,8 +164,37 @@ internal sealed class LibraryModel
 
     internal static string Fingerprint(string path) => SPhoto.Library.Fingerprint.Compute(path);
 
-    /// Records a saved edit as a version of the photo it came from.
-    internal static void RecordVersion(LibraryIndex index, string original, string saved)
+    /// <summary>
+    /// What the viewer calls a version of the shot: the name the user or
+    /// the edit gave it, else "版本 N" counting from the oldest.
+    /// </summary>
+    internal string VersionLabel(Shot shot, PhotoEntry version)
+    {
+        if (_catalog.ByPath.GetValueOrDefault(version.Path) is { } photo && _catalog.VersionName(photo.Fingerprint) is { } name)
+            return name;
+        int newestFirst = shot.Versions.ToList().FindIndex(v => string.Equals(v.Path, version.Path, StringComparison.OrdinalIgnoreCase));
+        return $"版本 {shot.Versions.Count - Math.Max(0, newestFirst)}";
+    }
+
+    /// Whether the version has a name of its own (not just "版本 N").
+    internal bool HasVersionName(PhotoEntry version) =>
+        _catalog.ByPath.GetValueOrDefault(version.Path) is { } photo && _catalog.VersionName(photo.Fingerprint) is not null;
+
+    /// <summary>
+    /// Names a version (null or blank: back to "版本 N"). Only the index
+    /// changes; the file keeps its name. False when the version or its
+    /// original has no fingerprint yet.
+    /// </summary>
+    internal bool RenameVersion(PhotoEntry version, string? name)
+    {
+        if (KeyOf(version.Path) is not { } key || _catalog.OriginalOf(key) is not { IsFingerprinted: true } original) return false;
+        _index.SetVersionName(original.Fingerprint, key, name);
+        return true;
+    }
+
+    /// Records a saved edit as a version of the photo it came from, named
+    /// name (numbered when the photo already has a version by that name).
+    internal static void RecordVersion(LibraryIndex index, string original, string saved, string? name = null)
     {
         try
         {
@@ -167,7 +205,8 @@ internal sealed class LibraryModel
             var from = known?.Fingerprint is { } fp && known.Matches(info.Length, info.LastWriteTimeUtc.Ticks)
                 ? fp : SPhoto.Library.Fingerprint.Compute(original);
             var to = SPhoto.Library.Fingerprint.Compute(saved);
-            index.AddVersion(from, to);
+            if (name is not null) name = Versions.Numbered(name, index.VersionNamesOf(from));
+            index.AddVersion(from, to, name);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

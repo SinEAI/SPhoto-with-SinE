@@ -349,7 +349,7 @@ internal sealed class MainEditor : Grid
         // viewer image. Clearing Session while Stage is visible paints white.
         try
         {
-            await _owner.EditorClosedAsync(_original, saved);
+            await _owner.EditorClosedAsync(_original, saved, _session?.Saved.SuggestedName());
         }
         finally
         {

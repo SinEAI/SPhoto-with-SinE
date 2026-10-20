@@ -35,6 +35,9 @@ internal static class MainSelfTest
             $"main: every tile on screen has its thumbnail ({d.Grid.BlankTilesOnScreen()} blank, loader {SPhoto.Services.ThumbnailLoader.Stats})");
         log.Note($"main: tiles healed after list changes: {d.Grid.Healed}");
         await Screenshots.SaveAsync(log, d.XamlRoot?.Content, "1-all-photos");
+        var fit = d.Grid.FitForTest();
+        log.Check(fit.Columns > 0 && fit.Slack < fit.Columns + 1,
+            $"main: the photo grid's columns fill its width ({fit.Columns} columns, {fit.Slack:F1} px left)");
 
         // ----- 文件夹: every file as it is.
         d.Go("folder:" + root);
@@ -108,8 +111,30 @@ internal static class MainSelfTest
         d.Go("page:" + pageId);
         log.Check(d.PageTitle == "测试页面" && d.CardsShown && d.CardCount == 1, "main: a page shows a card for each of its tags");
         await d.SetCardSizeForTest(pageId, "测试标签", SPhoto.Library.CardSize.Large);
-        log.Check(d.CardCount == 1 && d.FirstCardColumnsForTest == 2, "main: a tag's card on a page can be made large");
+        // A card's span depends on the columns the wall has room for, known after layout.
+        d.CardsForTest.UpdateLayout();
+        log.Check(d.CardCount == 1 && d.FirstCardColumnsForTest == 2,
+            $"main: a tag's card on a page can be made large ({d.FirstCardColumnsForTest} of {d.CardsForTest.Columns} columns)");
+        log.Check(d.FirstCardStyleForTest is { } auto && auto != SPhoto.Library.CardStyle.Auto,
+            $"main: a card on 随机样式 shows one of the standard components ({d.FirstCardStyleForTest})");
+        foreach (var style in new[] { SPhoto.Library.CardStyle.Slant, SPhoto.Library.CardStyle.Feature, SPhoto.Library.CardStyle.Mosaic,
+                                      SPhoto.Library.CardStyle.Scatter, SPhoto.Library.CardStyle.Slideshow })
+        {
+            await d.SetCardStyleForTest(pageId, "测试标签", style);
+            log.Check(d.CardCount == 1 && d.FirstCardStyleForTest == style, $"main: a card can show its tag as {style}");
+        }
+        await d.SetCardSizeForTest(pageId, "测试标签", SPhoto.Library.CardSize.ExtraLarge);
+        await d.SetCardStyleForTest(pageId, "测试标签", SPhoto.Library.CardStyle.Scatter);
+        var wall = d.CardsForTest;
+        wall.UpdateLayout();
+        log.Check(d.FirstCardColumnsForTest == (wall.Columns >= 4 ? 4 : wall.Columns >= 2 ? 2 : 1),
+            $"main: an extra large card takes four columns when they fit ({d.FirstCardColumnsForTest} of {wall.Columns})");
+        log.Check(wall.Slack < wall.Columns + 1, $"main: the cards fill the page's width ({wall.Slack:F1} px left)");
         await Screenshots.SaveAsync(log, d.XamlRoot?.Content, "2-page-by-tag");
+        await d.SetCardStyleForTest(pageId, "测试标签", SPhoto.Library.CardStyle.Auto);
+        d.ShuffleForTest();
+        log.Check(d.CardCount == 1 && d.FirstCardStyleForTest is { } shuffled && shuffled != SPhoto.Library.CardStyle.Auto,
+            "main: 换一批照片 shows the cards again");
         d.ShowPageAllForTest(true);
         log.Check(!d.CardsShown && d.Grid.Entries.Count == 1, "main: the page can show all its photos instead");
         d.ShowPageAllForTest(false);
@@ -199,6 +224,16 @@ internal static class MainSelfTest
                      $"catalog paths: {string.Join(" | ", catalog.ByPath.Keys)}");
         }
         log.Check(!folded || viewer.VersionChoices >= 2, "main: the viewer offers 原图 and the version");
+        if (folded)
+        {
+            bool renamed = await viewer.RenameVersionForTest(0, "测试版本");
+            log.Check(renamed && viewer.VersionLabelForTest(1) == "测试版本",
+                $"main: a version can be renamed ({viewer.VersionLabelForTest(1)})");
+            log.Check(saved is not null && File.Exists(saved), "main: renaming a version leaves its file as it is");
+            await viewer.RenameVersionForTest(0, null);
+            log.Check(viewer.VersionLabelForTest(1) is { } label && label != "测试版本",
+                $"main: a renamed version can go back to its default name ({viewer.VersionLabelForTest(1)})");
+        }
         viewer.Close();
         log.Check(viewer.Visibility == Visibility.Collapsed, "main: closing the viewer returns to the grid");
         log.Check(d.Grid.Entries.All(p => !string.Equals(p.Path, saved, StringComparison.OrdinalIgnoreCase)),
