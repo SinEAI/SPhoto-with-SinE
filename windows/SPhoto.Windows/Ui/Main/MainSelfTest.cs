@@ -111,7 +111,10 @@ internal static class MainSelfTest
         d.Go("page:" + pageId);
         log.Check(d.PageTitle == "测试页面" && d.CardsShown && d.CardCount == 1, "main: a page shows a card for each of its tags");
         await d.SetCardSizeForTest(pageId, "测试标签", SPhoto.Library.CardSize.Large);
-        log.Check(d.CardCount == 1 && d.FirstCardColumnsForTest == 2, "main: a tag's card on a page can be made large");
+        // A card's span depends on the columns the wall has room for, known after layout.
+        d.CardsForTest.UpdateLayout();
+        log.Check(d.CardCount == 1 && d.FirstCardColumnsForTest == 2,
+            $"main: a tag's card on a page can be made large ({d.FirstCardColumnsForTest} of {d.CardsForTest.Columns} columns)");
         log.Check(d.FirstCardStyleForTest is { } auto && auto != SPhoto.Library.CardStyle.Auto,
             $"main: a card on 随机样式 shows one of the standard components ({d.FirstCardStyleForTest})");
         foreach (var style in new[] { SPhoto.Library.CardStyle.Slant, SPhoto.Library.CardStyle.Feature, SPhoto.Library.CardStyle.Mosaic,
@@ -122,8 +125,8 @@ internal static class MainSelfTest
         }
         await d.SetCardSizeForTest(pageId, "测试标签", SPhoto.Library.CardSize.ExtraLarge);
         await d.SetCardStyleForTest(pageId, "测试标签", SPhoto.Library.CardStyle.Scatter);
-        await Task.Delay(300);
         var wall = d.CardsForTest;
+        wall.UpdateLayout();
         log.Check(d.FirstCardColumnsForTest == (wall.Columns >= 4 ? 4 : wall.Columns >= 2 ? 2 : 1),
             $"main: an extra large card takes four columns when they fit ({d.FirstCardColumnsForTest} of {wall.Columns})");
         log.Check(wall.Slack < wall.Columns + 1, $"main: the cards fill the page's width ({wall.Slack:F1} px left)");
