@@ -28,15 +28,28 @@ public sealed record TagInfo(string Name, TagSource Source);
 
 public sealed record TagCount(string Name, int Count);
 
-/// <summary>How big a tag's card is on a page, in cells: 1×1, 2×1 or 2×2.</summary>
-public enum CardSize { Small = 0, Medium = 1, Large = 2 }
+/// <summary>
+/// How big a tag's card is on a page, in cells: 1×1, 2×1, 2×2 or 4×2. A
+/// few fixed sizes, as home screen widgets have, so any arrangement still
+/// lines up.
+/// </summary>
+public enum CardSize { Small = 0, Medium = 1, Large = 2, ExtraLarge = 3 }
+
+/// <summary>
+/// Which standard component shows a tag's photos on a page. Auto picks
+/// one of the others each time the page is shown.
+/// </summary>
+public enum CardStyle { Auto = 0, Slant = 1, Feature = 2, Scatter = 3, Mosaic = 4, Slideshow = 5 }
 
 /// <summary>A page: a named set of tags the user shows together, in their order,
-/// each tag's card at the size chosen for this page.</summary>
+/// each tag's card at the size and in the style chosen for this page.</summary>
 public sealed record PageInfo(long Id, string Name, IReadOnlyList<string> Tags, bool Archived,
-                              IReadOnlyDictionary<string, CardSize>? Sizes = null)
+                              IReadOnlyDictionary<string, CardSize>? Sizes = null,
+                              IReadOnlyDictionary<string, CardStyle>? Styles = null)
 {
     public CardSize SizeOf(string tag) => Sizes is not null && Sizes.TryGetValue(tag, out var size) ? size : CardSize.Small;
+
+    public CardStyle StyleOf(string tag) => Styles is not null && Styles.TryGetValue(tag, out var style) ? style : CardStyle.Auto;
 }
 
 /// <summary>A photo the analyzer still has to look at, and one file to read it from.</summary>

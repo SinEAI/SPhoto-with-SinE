@@ -145,12 +145,19 @@ public class IndexTests
         // Card sizes are per page and survive editing the page's tags.
         index.SetPageTagSize(people, "强斯", CardSize.Large);
         index.SetPageTagSize(trips, "洛杉矶", CardSize.Medium);
+        index.SetPageTagSize(trips, "佛罗里达", CardSize.ExtraLarge);
+        index.SetPageTagStyle(people, "强斯", CardStyle.Scatter);
+        index.SetPageTagStyle(trips, "洛杉矶", CardStyle.Slideshow);
         Assert.Equal(CardSize.Large, index.Pages()[0].SizeOf("强斯"));
         Assert.Equal(CardSize.Small, index.Pages()[0].SizeOf("希乐"));
         Assert.Equal(CardSize.Small, index.Pages()[1].SizeOf("强斯"));
+        Assert.Equal(CardSize.ExtraLarge, index.Pages()[1].SizeOf("佛罗里达"));
+        Assert.Equal(CardStyle.Scatter, index.Pages()[0].StyleOf("强斯"));
+        Assert.Equal(CardStyle.Auto, index.Pages()[0].StyleOf("希乐"));
         index.RenamePage(people, "家人");
         index.SetPageTags(people, new[] { "强斯" });
         Assert.Equal(CardSize.Large, index.Pages()[0].SizeOf("强斯"));
+        Assert.Equal(CardStyle.Scatter, index.Pages()[0].StyleOf("强斯"));
         index.ArchivePage(trips, true);
         Assert.Equal(new[] { ("家人", "强斯", false), ("旅游", "佛罗里达,洛杉矶", true) },
                      index.Pages().Select(p => (p.Name, string.Join(",", p.Tags), p.Archived)));
@@ -159,6 +166,7 @@ public class IndexTests
         index.RenameTag("洛杉矶", "LA");
         Assert.Equal(new[] { "佛罗里达", "LA" }, index.Pages()[1].Tags);
         Assert.Equal(CardSize.Medium, index.Pages()[1].SizeOf("LA"));
+        Assert.Equal(CardStyle.Slideshow, index.Pages()[1].StyleOf("LA"));
         Assert.Equal("fc", Assert.Single(index.Catalog().Items(CatalogScope.Tag("LA"))).Cover.Fingerprint);
         index.DeleteTag("佛罗里达");
         Assert.Equal(new[] { "LA" }, index.Pages()[1].Tags);
@@ -211,6 +219,26 @@ public class IndexTests
         index.AddVersion("other", "v1");
         catalog = index.Catalog();
         Assert.Equal("other", catalog.ItemOf("v1")!.Cover.Fingerprint);
+
+        // Names: given when recorded, changed or cleared later, kept when
+        // the version is recorded again without one. Files keep their names.
+        index.SetVersionName("orig", "v2", "胶片");  // known by its file name only until now
+        index.SetVersionName("orig", "v1", " 给妈妈 ");  // recorded under IMG_2 above
+        index.AddVersion("orig", "v3", "黑白");
+        catalog = index.Catalog();
+        Assert.Equal("胶片", catalog.VersionName("v2"));
+        Assert.Equal("orig", catalog.OriginalOf("v2")!.Fingerprint);
+        Assert.Equal("给妈妈", catalog.VersionName("v1"));
+        Assert.Equal("other", catalog.ItemOf("v1")!.Cover.Fingerprint);  // naming did not move it
+        Assert.Equal("黑白", catalog.VersionName("v3"));
+        Assert.Equal(new[] { "胶片", "黑白" }, index.VersionNamesOf("orig").Order(StringComparer.Ordinal));
+        index.AddVersion("orig", "v2");
+        Assert.Equal("胶片", index.Catalog().VersionName("v2"));
+        index.SetVersionName("orig", "v2", "  ");
+        Assert.Null(index.Catalog().VersionName("v2"));
+        Assert.Equal("orig", index.Catalog().OriginalOf("v2")!.Fingerprint);
+        index.SetVersionName("orig", "v4", "无此文件");  // a version not on disk stays out of the catalog
+        Assert.Null(index.Catalog().ItemOf("v4"));
 
         // In a tag holding only a version, the version shows on its own.
         index.AddTag("v2", "修过的");
@@ -339,7 +367,12 @@ public class IndexTests
         {
             raw.Open();
             using var cmd = raw.CreateCommand();
-            cmd.CommandText = "ALTER TABLE page_tags DROP COLUMN size; PRAGMA user_version = 2;";
+            cmd.CommandText = """
+                ALTER TABLE page_tags DROP COLUMN style;
+                ALTER TABLE versions DROP COLUMN name;
+                ALTER TABLE page_tags DROP COLUMN size;
+                PRAGMA user_version = 2;
+                """;
             cmd.ExecuteNonQuery();
         }
         using (var index = LibraryIndex.Open(db))
@@ -348,6 +381,40 @@ public class IndexTests
             Assert.Equal(CardSize.Small, page.SizeOf("希乐"));
             index.SetPageTagSize(page.Id, "希乐", CardSize.Medium);
             Assert.Equal(CardSize.Medium, index.Pages()[0].SizeOf("希乐"));
+        }
+    }
+
+    [Fact]
+    public void PagesAndVersionsFromBeforeStylesKeepWhatTheyHad()
+    {
+        using var dir = new TempDir();
+        var db = Path.Combine(dir.Path, "library.db");
+        using (var index = LibraryIndex.Open(db))
+        {
+            index.UpsertMany(new[] { F(P("IMG_1.jpg"), "orig"), F(P("copy.jpg"), "v1", mtime: 5) });
+            index.AddVersion("orig", "v1");
+            long id = index.CreatePage("人物", new[] { "希乐" });
+            index.SetPageTagSize(id, "希乐", CardSize.Large);
+        }
+        using (var raw = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={db};Pooling=False"))
+        {
+            raw.Open();
+            using var cmd = raw.CreateCommand();
+            cmd.CommandText = """
+                ALTER TABLE page_tags DROP COLUMN style;
+                ALTER TABLE versions DROP COLUMN name;
+                PRAGMA user_version = 3;
+                """;
+            cmd.ExecuteNonQuery();
+        }
+        using (var index = LibraryIndex.Open(db))
+        {
+            var page = Assert.Single(index.Pages());
+            Assert.Equal(CardSize.Large, page.SizeOf("希乐"));
+            Assert.Equal(CardStyle.Auto, page.StyleOf("希乐"));
+            var catalog = index.Catalog();
+            Assert.Equal("orig", catalog.OriginalOf("v1")!.Fingerprint);
+            Assert.Null(catalog.VersionName("v1"));
         }
     }
 

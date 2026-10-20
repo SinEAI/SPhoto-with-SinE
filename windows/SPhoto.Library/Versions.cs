@@ -32,6 +32,21 @@ public static class Versions
     public static bool IsEditedName(string fileName) => OriginalStem(fileName) is not null;
 
     /// <summary>
+    /// name, or "name 2", "name 3"… when the photo already has a version by
+    /// that name, so two "胶片" versions can still be told apart.
+    /// </summary>
+    public static string Numbered(string name, IEnumerable<string?> taken)
+    {
+        var names = new HashSet<string>(taken.OfType<string>(), StringComparer.Ordinal);
+        if (!names.Contains(name)) return name;
+        for (int n = 2; ; n++)
+        {
+            var candidate = $"{name} {n}";
+            if (!names.Contains(candidate)) return candidate;
+        }
+    }
+
+    /// <summary>
     /// For every edited copy among paths whose original ("stem.&lt;any photo
     /// extension&gt;" in the same folder) is also among them: version path →
     /// original path. When several originals share the stem, the one with the
